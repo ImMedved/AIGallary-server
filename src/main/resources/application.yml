@@ -1,0 +1,55 @@
+server:
+  port: 8080
+  forward-headers-strategy: framework
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/photo_cloud}
+    username: ${SPRING_DATASOURCE_USERNAME:photo_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:photo_password}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+app:
+  cors:
+    allowed-origins:
+      - ${APP_CORS_ALLOWED_ORIGIN:http://localhost:5173}
+
+  jwt:
+    secret: ${APP_JWT_SECRET:change-this-secret-change-this-secret-change-this-secret}
+    expiration-ms: ${APP_JWT_EXPIRATION_MS:86400000}
+
+  storage:
+    provider: ${APP_STORAGE_PROVIDER:filesystem}
+    bucket: ${APP_STORAGE_BUCKET:smart-gallery-media}
+
+    filesystem:
+      root: ${APP_STORAGE_FILESYSTEM_ROOT:./storage}
+
+    minio:
+      endpoint: ${APP_STORAGE_MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${APP_STORAGE_MINIO_ACCESS_KEY:minio}
+      secret-key: ${APP_STORAGE_MINIO_SECRET_KEY:minio123}
+
+  analysis:
+    enabled: ${APP_ANALYSIS_ENABLED:false}
+    base-url: ${APP_ANALYSIS_BASE_URL:http://localhost:8090}
+    top-tags: ${APP_ANALYSIS_TOP_TAGS:5}
+    connect-timeout-ms: ${APP_ANALYSIS_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${APP_ANALYSIS_READ_TIMEOUT_MS:60000}
+    processing:
+      poll-delay-ms: ${APP_ANALYSIS_POLL_DELAY_MS:2000}
+      max-attempts: ${APP_ANALYSIS_MAX_ATTEMPTS:5}
+      scheduling-enabled: ${APP_ANALYSIS_SCHEDULING_ENABLED:true}

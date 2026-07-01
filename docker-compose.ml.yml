@@ -1,0 +1,9 @@
+services:
+
+  analysis:
+    build:
+      context: ./analysis-service
+      args:
+        INSTALL_ML: "true"
+    environment:
+      ANALYSIS_PROVIDER: yolo_paddle

@@ -1,0 +1,21 @@
+services:
+
+  server:
+    build: .
+    container_name: photo-server
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/photo_cloud
+      SPRING_DATASOURCE_USERNAME: photo_user
+      SPRING_DATASOURCE_PASSWORD: photo_password
+      APP_STORAGE_PROVIDER: minio
+      APP_STORAGE_BUCKET: smart-gallery-media
+      APP_STORAGE_MINIO_ENDPOINT: http://minio:9000
+      APP_STORAGE_MINIO_ACCESS_KEY: minio
+      APP_STORAGE_MINIO_SECRET_KEY: minio123
+      APP_ANALYSIS_ENABLED: "true"
+      APP_ANALYSIS_BASE_URL: http://analysis:8090
+      APP_CORS_ALLOWED_ORIGIN: ${APP_CORS_ALLOWED_ORIGIN:-http://localhost:5173}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-change-this-secret-change-this-secret-change-this-secret}
+    ports:
+      - "8080:8080"

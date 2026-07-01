@@ -1,0 +1,59 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: photo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: photo_cloud
+      POSTGRES_USER: photo_user
+      POSTGRES_PASSWORD: photo_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_v3:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U photo_user -d photo_cloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: photo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data_v3:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  analysis:
+    build:
+      context: ./analysis-service
+    container_name: photo-analysis
+    restart: unless-stopped
+    environment:
+      ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-mock}
+      YOLO_MODEL: ${YOLO_MODEL:-yolov8n.pt}
+      PADDLE_OCR_LANG: ${PADDLE_OCR_LANG:-en}
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+volumes:
+  postgres_data_v3:
+  minio_data_v3:

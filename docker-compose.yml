@@ -1,0 +1,88 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: photo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: photo_cloud
+      POSTGRES_USER: photo_user
+      POSTGRES_PASSWORD: photo_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_v3:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U photo_user -d photo_cloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: photo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data_v3:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  analysis:
+    build:
+      context: ./analysis-service
+      args:
+        INSTALL_ML: "true"
+    container_name: photo-analysis
+    restart: unless-stopped
+    environment:
+      ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-yolo_paddle}
+      YOLO_MODEL: ${YOLO_MODEL:-yolov8n.pt}
+      PADDLE_OCR_LANG: ${PADDLE_OCR_LANG:-en}
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  server:
+    build: .
+    container_name: photo-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      analysis:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/photo_cloud
+      SPRING_DATASOURCE_USERNAME: photo_user
+      SPRING_DATASOURCE_PASSWORD: photo_password
+      APP_STORAGE_PROVIDER: minio
+      APP_STORAGE_BUCKET: smart-gallery-media
+      APP_STORAGE_MINIO_ENDPOINT: http://minio:9000
+      APP_STORAGE_MINIO_ACCESS_KEY: minio
+      APP_STORAGE_MINIO_SECRET_KEY: minio123
+      APP_ANALYSIS_ENABLED: "true"
+      APP_ANALYSIS_BASE_URL: http://analysis:8090
+      APP_CORS_ALLOWED_ORIGIN: ${APP_CORS_ALLOWED_ORIGIN:-http://localhost:5173}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-change-this-secret-change-this-secret-change-this-secret}
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data_v3:
+  minio_data_v3:

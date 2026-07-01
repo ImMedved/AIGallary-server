@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:smartgallery;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+app:
+  jwt:
+    secret: test-secret-test-secret-test-secret-test-secret
+    expiration-ms: 86400000
+
+  storage:
+    provider: filesystem
+    bucket: test-media
+    filesystem:
+      root: ./target/test-storage
+
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+
+  analysis:
+    processing:
+      scheduling-enabled: false
