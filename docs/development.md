@@ -117,7 +117,12 @@ Services:
 Local browser note:
 
 - default CORS allows both `http://localhost:5173` and `http://127.0.0.1:5173`;
-- if the frontend is opened from another host or port, set `APP_CORS_ALLOWED_ORIGINS` or `APP_CORS_ALLOWED_ORIGIN_PATTERNS` before starting the server container.
+- if the frontend is opened from another host or port, set `APP_CORS_ALLOWED_ORIGIN_LOCALHOST`, `APP_CORS_ALLOWED_ORIGIN_LOOPBACK`, or `APP_CORS_ALLOWED_ORIGIN_PATTERN_1` / `APP_CORS_ALLOWED_ORIGIN_PATTERN_2` before starting the server container.
+
+Media download note:
+
+- `originalUrl` and `thumbnailUrl` are returned as short-lived signed URLs for direct browser use;
+- this lets a plain `<img>` or `<a>` open media without manually attaching the JWT bearer header.
 
 Useful manual verification endpoints:
 

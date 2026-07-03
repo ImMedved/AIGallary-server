@@ -10,7 +10,7 @@ Current code boundaries:
 - `media`: upload flow, media catalog records, original and thumbnail delivery, manual tags, tag search, OCR text search.
 - `delivery`: persisted delivery requests and client-side acknowledgement flow.
 - `storage`: object storage abstraction plus MinIO and filesystem adapters.
-- `metadata`: image metadata extraction and initial metadata-based tagging.
+- `metadata`: image metadata extraction and semantic metadata tagging while keeping technical fields such as resolution and orientation separate.
 - `processing`: async post-upload queue and processing jobs.
 - `realtime`: WebSocket/STOMP notifications for library changes.
 - `analysis`: image analysis port backed by a sidecar that attempts YOLO/OCR analysis and falls back deterministically for the current known fixture images.
@@ -58,7 +58,7 @@ Terminates TLS, enforces public API policy, forwards traffic to internal service
 10. Asset status becomes `READY`, recognized text is stored, and tags are merged.
 11. Client can add manual tags and people labels and search by manual tags, metadata tags, AI tags, OCR text, and metadata filters.
 12. Client can create retryable delivery requests for original or thumbnail content and acknowledge receipt with checksum verification.
-13. Client can list assets and request original or thumbnail separately.
+13. Client can list assets and request original or thumbnail separately through authenticated endpoints or short-lived signed URLs.
 14. WebSocket notifies the owner about `MEDIA_UPDATED`, `MEDIA_READY`, and `TAGS_UPDATED`.
 
 ## Current limitations

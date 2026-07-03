@@ -35,6 +35,9 @@ app:
     secret: ${APP_JWT_SECRET:change-this-secret-change-this-secret-change-this-secret}
     expiration-ms: ${APP_JWT_EXPIRATION_MS:86400000}
 
+  media:
+    download-token-expiration-ms: ${APP_MEDIA_DOWNLOAD_TOKEN_EXPIRATION_MS:900000}
+
   storage:
     provider: ${APP_STORAGE_PROVIDER:filesystem}
     bucket: ${APP_STORAGE_BUCKET:smart-gallery-media}

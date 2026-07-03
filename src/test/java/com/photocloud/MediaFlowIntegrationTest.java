@@ -23,8 +23,10 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.List;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -89,10 +91,12 @@ class MediaFlowIntegrationTest {
         JsonNode json = objectMapper.readTree(body);
         long mediaId = json.get("id").asLong();
         assertNotNull(json.get("originalUrl"));
+        String originalUrl = json.get("originalUrl").asText();
+        assertTrue(originalUrl.contains("accessToken="));
 
         mediaProcessingQueueService.processNextPendingJob();
 
-        mockMvc.perform(get("/api/media")
+        String listBody = mockMvc.perform(get("/api/media")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(mediaId))
@@ -103,15 +107,18 @@ class MediaFlowIntegrationTest {
                 .andExpect(jsonPath("$[0].metadata.aspectRatio").value("2:1"))
                 .andExpect(jsonPath("$[0].recognizedText").value("Hello from OCR"))
                 .andExpect(jsonPath("$[0].tags[?(@ == 'cat')]").exists())
-                .andExpect(jsonPath("$[0].thumbnailUrl").value("/api/media/" + mediaId + "/thumbnail"));
+                .andExpect(jsonPath("$[0].thumbnailUrl", containsString("/api/media/" + mediaId + "/thumbnail?accessToken=")))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
 
-        mockMvc.perform(get("/api/media/" + mediaId + "/original")
-                        .header("Authorization", "Bearer " + token))
+        String thumbnailUrl = objectMapper.readTree(listBody).get(0).get("thumbnailUrl").asText();
+
+        mockMvc.perform(get(originalUrl))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.IMAGE_PNG));
 
-        mockMvc.perform(get("/api/media/" + mediaId + "/thumbnail")
-                        .header("Authorization", "Bearer " + token))
+        mockMvc.perform(get(thumbnailUrl))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.IMAGE_JPEG));
     }
@@ -143,10 +150,11 @@ class MediaFlowIntegrationTest {
                 .getResponse()
                 .getContentAsString();
 
-        long mediaId = objectMapper.readTree(body).get("id").asLong();
+        JsonNode uploadResponse = objectMapper.readTree(body);
+        long mediaId = uploadResponse.get("id").asLong();
+        String originalUrl = uploadResponse.get("originalUrl").asText();
 
-        mockMvc.perform(get("/api/media/" + mediaId + "/original")
-                        .header("Authorization", "Bearer " + token))
+        mockMvc.perform(get(originalUrl))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType("video/mp4"));
     }

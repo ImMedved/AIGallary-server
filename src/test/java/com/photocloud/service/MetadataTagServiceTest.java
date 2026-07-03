@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MetadataTagServiceTest {
@@ -29,8 +30,8 @@ class MetadataTagServiceTest {
 
         assertTrue(tags.contains("year:2024"));
         assertTrue(tags.contains("device:google-pixel-8"));
-        assertTrue(tags.contains("resolution:4000x3000"));
-        assertTrue(tags.contains("geo:present"));
-        assertTrue(tags.contains("orientation:horizontal-normal"));
+        assertFalse(tags.contains("resolution:4000x3000"));
+        assertFalse(tags.contains("geo:present"));
+        assertFalse(tags.contains("orientation:horizontal-normal"));
     }
 }

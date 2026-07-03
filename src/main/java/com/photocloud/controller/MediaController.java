@@ -84,13 +84,16 @@ public class MediaController {
     }
 
     @GetMapping("/{id}/original")
-    public ResponseEntity<Resource> original(@PathVariable Long id) {
-        var media = mediaService.original(id);
+    public ResponseEntity<Resource> original(
+            @PathVariable Long id,
+            @RequestParam(name = "accessToken", required = false) String accessToken
+    ) {
+        var media = mediaService.original(id, accessToken);
 
         return ResponseEntity.ok()
                 .contentLength(media.sizeBytes())
                 .contentType(org.springframework.http.MediaType.parseMediaType(media.contentType()))
-                .header("X-Checksum-Sha256", mediaService.checksum(id))
+                .header("X-Checksum-Sha256", mediaService.checksum(id, accessToken))
                 .header(
                         HttpHeaders.CONTENT_DISPOSITION,
                         "inline; filename=\"" + media.filename() + "\""
@@ -99,8 +102,11 @@ public class MediaController {
     }
 
     @GetMapping("/{id}/thumbnail")
-    public ResponseEntity<Resource> thumbnail(@PathVariable Long id) {
-        var media = mediaService.thumbnail(id);
+    public ResponseEntity<Resource> thumbnail(
+            @PathVariable Long id,
+            @RequestParam(name = "accessToken", required = false) String accessToken
+    ) {
+        var media = mediaService.thumbnail(id, accessToken);
 
         return ResponseEntity.ok()
                 .contentLength(media.sizeBytes())

@@ -16,7 +16,7 @@ Backend foundation for the Smart Gallery platform. The project is aligned to Jav
 - 128x128 JPEG thumbnail generation for images
 - asynchronous image post-processing after upload
 - metadata extraction from images
-- metadata-based initial tagging
+- metadata extraction kept in separate fields instead of mixing resolution/orientation into user-facing tags
 - OCR text extraction through analysis sidecar with fallback behavior
 - auto-tagging through analysis sidecar
 - manual tag management
@@ -81,6 +81,7 @@ Authorization: Bearer <token>
 
 - originals are stored remotely as object variants
 - photo thumbnails are stored as separate 128x128 JPEG variants
+- `originalUrl` and `thumbnailUrl` are returned as short-lived signed browser-friendly URLs
 - client can keep only thumbnails locally and load originals on demand
 - Docker Compose uses MinIO
 - image uploads return immediately and are enriched asynchronously

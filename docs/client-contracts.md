@@ -56,6 +56,11 @@ Authorization: Bearer <jwt>
 
 One user can have only one active session. After a new login, the previous token becomes invalid.
 
+Browser media-link note:
+
+- `originalUrl` and `thumbnailUrl` inside `MediaResponse` are short-lived signed URLs;
+- browser clients can use them directly in `<a>` or `<img>` without manually attaching the JWT bearer header.
+
 ## Integrity contract
 
 Upload supports optional checksum verification through request param `checksumSha256`.
@@ -114,7 +119,7 @@ Photo response example:
   "tags": [],
   "people": [],
   "thumbnailUrl": null,
-  "originalUrl": "/api/media/101/original"
+  "originalUrl": "/api/media/101/original?accessToken=<signed-token>"
 }
 ```
 
@@ -146,14 +151,12 @@ After background processing finishes, the same asset becomes:
   "tags": [
     "year:2025",
     "device:apple-iphone-14",
-    "resolution:4032x3024",
-    "geo:present",
     "cat",
     "sofa"
   ],
   "people": [],
-  "thumbnailUrl": "/api/media/101/thumbnail",
-  "originalUrl": "/api/media/101/original"
+  "thumbnailUrl": "/api/media/101/thumbnail?accessToken=<signed-token>",
+  "originalUrl": "/api/media/101/original?accessToken=<signed-token>"
 }
 ```
 
@@ -176,7 +179,7 @@ Video response example:
   "tags": [],
   "people": [],
   "thumbnailUrl": null,
-  "originalUrl": "/api/media/102/original"
+  "originalUrl": "/api/media/102/original?accessToken=<signed-token>"
 }
 ```
 
@@ -218,8 +221,8 @@ Response:
     "recognizedText": "Hello from OCR",
     "tags": ["year:2025", "vacation"],
     "people": ["Alice"],
-    "thumbnailUrl": "/api/media/101/thumbnail",
-    "originalUrl": "/api/media/101/original"
+    "thumbnailUrl": "/api/media/101/thumbnail?accessToken=<signed-token>",
+    "originalUrl": "/api/media/101/original?accessToken=<signed-token>"
   }
 ]
 ```
@@ -239,9 +242,13 @@ Examples:
 - `GET /api/media?tag=vacation&tag=family&mode=ALL`
 - `GET /api/media?tag=vacation&tag=favorites&mode=ANY`
 
-Search matches both metadata-generated tags and user-added tags.
+Search matches semantic metadata tags, AI tags, and user-added tags.
 
 If auto-tagging is enabled in the analysis sidecar, AI-generated tags are included too.
+
+Current metadata note:
+
+- resolution, orientation, and geo-presence are returned in `metadata` and metadata filters, not duplicated into the regular `tags` list.
 
 Current implementation note:
 
@@ -290,6 +297,8 @@ Example:
 
 Use this endpoint when the user opens an item and the client has only a thumbnail cached locally.
 
+For browser clients, prefer the signed `originalUrl` returned by `MediaResponse`.
+
 ## Download thumbnail
 
 `GET /api/media/{id}/thumbnail`
@@ -297,6 +306,8 @@ Use this endpoint when the user opens an item and the client has only a thumbnai
 This endpoint returns a 128x128 JPEG thumbnail for photos.
 
 For videos there is currently no thumbnail endpoint payload because no thumbnail is generated yet.
+
+For browser clients, prefer the signed `thumbnailUrl` returned by `MediaResponse`.
 
 ## Delete media
 

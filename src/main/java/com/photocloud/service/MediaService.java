@@ -10,10 +10,12 @@ import com.photocloud.repository.MediaDeliveryRequestRepository;
 import com.photocloud.repository.MediaMetadataRepository;
 import com.photocloud.repository.MediaTagRepository;
 import com.photocloud.repository.MediaVariantRepository;
+import com.photocloud.security.MediaAccessTokenService;
 import com.photocloud.security.UserDetailsServiceImpl;
 import com.photocloud.storage.ObjectStorage;
 import com.photocloud.storage.StoredObject;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +53,7 @@ public class MediaService {
     private final ChecksumService checksumService;
     private final MediaEventPublisher mediaEventPublisher;
     private final com.photocloud.config.StorageProperties storageProperties;
+    private final MediaAccessTokenService mediaAccessTokenService;
 
     public MediaService(
             MediaAssetRepository mediaAssetRepository,
@@ -64,7 +67,8 @@ public class MediaService {
             TagNormalizationService tagNormalizationService,
             ChecksumService checksumService,
             MediaEventPublisher mediaEventPublisher,
-            com.photocloud.config.StorageProperties storageProperties
+            com.photocloud.config.StorageProperties storageProperties,
+            MediaAccessTokenService mediaAccessTokenService
     ) {
         this.mediaAssetRepository = mediaAssetRepository;
         this.mediaVariantRepository = mediaVariantRepository;
@@ -78,6 +82,7 @@ public class MediaService {
         this.checksumService = checksumService;
         this.mediaEventPublisher = mediaEventPublisher;
         this.storageProperties = storageProperties;
+        this.mediaAccessTokenService = mediaAccessTokenService;
     }
 
     @Transactional
@@ -251,8 +256,8 @@ public class MediaService {
         return toResponse(view);
     }
 
-    public MediaDownload original(Long id) {
-        MediaAsset asset = getOwnedMedia(id);
+    public MediaDownload original(Long id, String accessToken) {
+        MediaAsset asset = getAccessibleMedia(id, VariantType.ORIGINAL, accessToken);
         MediaVariant variant = getVariant(asset.getId(), VariantType.ORIGINAL);
         StoredObject object = objectStorage.getObject(variant.getBucketName(), variant.getObjectKey());
 
@@ -264,8 +269,12 @@ public class MediaService {
         );
     }
 
-    public MediaDownload thumbnail(Long id) {
-        MediaAsset asset = getOwnedMedia(id);
+    public MediaDownload original(Long id) {
+        return original(id, null);
+    }
+
+    public MediaDownload thumbnail(Long id, String accessToken) {
+        MediaAsset asset = getAccessibleMedia(id, VariantType.THUMBNAIL, accessToken);
         MediaVariant variant = getVariant(asset.getId(), VariantType.THUMBNAIL);
         StoredObject object = objectStorage.getObject(variant.getBucketName(), variant.getObjectKey());
 
@@ -277,9 +286,20 @@ public class MediaService {
         );
     }
 
+    public MediaDownload thumbnail(Long id) {
+        return thumbnail(id, null);
+    }
+
     public MediaAsset getOwnedMedia(Long id) {
         AppUser user = currentUser();
+        return getOwnedMedia(id, user);
+    }
 
+    public String checksum(Long id, String accessToken) {
+        return getAccessibleMedia(id, VariantType.ORIGINAL, accessToken).getChecksumSha256();
+    }
+
+    private MediaAsset getOwnedMedia(Long id, AppUser user) {
         return mediaAssetRepository.findByIdAndOwnerId(id, user.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Media not found"));
     }
@@ -357,9 +377,26 @@ public class MediaService {
     }
 
     private AppUser currentUser() {
+        AppUser user = currentUserOrNull();
+        if (user == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+        return user;
+    }
+
+    private AppUser currentUserOrNull() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return null;
+        }
+
         String login = SecurityContextHolder.getContext()
                 .getAuthentication()
                 .getName();
+
+        if (login == null || login.isBlank() || "anonymousUser".equals(login)) {
+            return null;
+        }
 
         return userDetailsService.loadAppUser(login);
     }
@@ -402,8 +439,8 @@ public class MediaService {
                 view.asset().getRecognizedText(),
                 tagValues,
                 people,
-                view.thumbnailVariant() == null ? null : "/api/media/" + view.asset().getId() + "/thumbnail",
-                view.originalVariant() == null ? null : "/api/media/" + view.asset().getId() + "/original"
+                view.thumbnailVariant() == null ? null : buildSignedVariantUrl(view.asset(), VariantType.THUMBNAIL),
+                view.originalVariant() == null ? null : buildSignedVariantUrl(view.asset(), VariantType.ORIGINAL)
         );
     }
 
@@ -497,6 +534,19 @@ public class MediaService {
         ).orElse(null);
 
         return new MediaResponseView(asset, metadata, tags, originalVariant, thumbnailVariant);
+    }
+
+    private MediaAsset getAccessibleMedia(Long id, VariantType variantType, String accessToken) {
+        AppUser user = currentUserOrNull();
+
+        if (user != null) {
+            return getOwnedMedia(id, user);
+        }
+
+        MediaAsset asset = mediaAssetRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Media not found"));
+        mediaAccessTokenService.validate(accessToken, asset, variantType);
+        return asset;
     }
 
     private void verifyChecksum(String expectedChecksumSha256, String actualChecksum) {
@@ -672,6 +722,12 @@ public class MediaService {
 
     private String toPersonTag(String person) {
         return PERSON_PREFIX + person;
+    }
+
+    private String buildSignedVariantUrl(MediaAsset asset, VariantType variantType) {
+        String token = mediaAccessTokenService.generateToken(asset, variantType);
+        return "/api/media/" + asset.getId() + "/" + variantType.name().toLowerCase(Locale.ROOT)
+                + "?accessToken=" + token;
     }
 
     private MediaDeliveryRequest getOwnedDelivery(Long deliveryId) {

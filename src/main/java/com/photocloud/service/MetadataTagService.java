@@ -23,18 +23,6 @@ public class MetadataTagService {
             tags.add("device:" + normalize(metadata.deviceName()));
         }
 
-        if (metadata.widthPx() != null && metadata.heightPx() != null) {
-            tags.add("resolution:" + metadata.widthPx() + "x" + metadata.heightPx());
-        }
-
-        if (metadata.latitude() != null && metadata.longitude() != null) {
-            tags.add("geo:present");
-        }
-
-        if (metadata.orientation() != null && !metadata.orientation().isBlank()) {
-            tags.add("orientation:" + normalize(metadata.orientation()));
-        }
-
         return new ArrayList<>(tags);
     }
 

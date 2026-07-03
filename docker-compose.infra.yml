@@ -44,14 +44,18 @@ services:
   analysis:
     build:
       context: ./analysis-service
+      args:
+        INSTALL_ML: "true"
     container_name: photo-analysis
     restart: unless-stopped
     networks:
       - gallery-backend
     environment:
-      ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-mock}
-      YOLO_MODEL: ${YOLO_MODEL:-yolov8n.pt}
-      PADDLE_OCR_LANG: ${PADDLE_OCR_LANG:-en}
+      ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-yolo_paddle}
+      YOLO_MODEL: ${YOLO_MODEL:-yolov8s.pt}
+      YOLO_CONFIDENCE: ${YOLO_CONFIDENCE:-0.12}
+      YOLO_IMAGE_SIZE: ${YOLO_IMAGE_SIZE:-960}
+      PADDLE_OCR_LANG: ${PADDLE_OCR_LANG:-ru}
     ports:
       - "8090:8090"
     healthcheck:
