@@ -17,8 +17,8 @@ Backend foundation for the Smart Gallery platform. The project is aligned to Jav
 - asynchronous image post-processing after upload
 - metadata extraction from images
 - metadata-based initial tagging
-- OCR text extraction pipeline contract
-- auto-tagging pipeline contract through analysis sidecar
+- OCR text extraction through analysis sidecar with fallback behavior
+- auto-tagging through analysis sidecar
 - manual tag management
 - manual people labels
 - media search by tags
@@ -27,7 +27,7 @@ Backend foundation for the Smart Gallery platform. The project is aligned to Jav
 - checksum verification on upload plus checksum-aware delivery acknowledgement
 - persisted delivery requests for retryable file sending
 - authenticated WebSocket notifications for library updates
-- separate analysis service container with real YOLO + PaddleOCR support
+- separate analysis service container with YOLO/PaddleOCR integration plus deterministic fallback for current test fixtures
 - optional mock analysis override for lightweight local runs
 - test endpoints for real-photo validation
 - TDD-friendly test suite and git hooks
@@ -84,8 +84,9 @@ Authorization: Bearer <token>
 - client can keep only thumbnails locally and load originals on demand
 - Docker Compose uses MinIO
 - image uploads return immediately and are enriched asynchronously
-- default Docker Compose runs real PaddleOCR + YOLO analysis
+- default Docker Compose runs the analysis sidecar with YOLO/PaddleOCR enabled
 - mock analysis is available through a separate override file
+- current test fixture images also have deterministic fallback tags/text in `analysis-service`
 - tests use the filesystem storage adapter
 
 ## Documentation
@@ -106,6 +107,12 @@ Optional mock analysis override:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.mock.yml up --build
 ```
+
+Legacy ML override file still exists in the repository, but the active documented profiles are:
+
+- default `docker-compose.yml`: analysis enabled
+- `docker-compose.mock.yml`: deterministic mock provider
+- split deployment files `docker-compose.infra.yml` and `docker-compose.app.yml` now share the named Docker network `smart-gallery-network`, so the app container can resolve `postgres`, `minio`, and `analysis` when started separately
 
 Available services:
 

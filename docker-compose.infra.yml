@@ -4,6 +4,8 @@ services:
     image: postgres:16
     container_name: photo-postgres
     restart: unless-stopped
+    networks:
+      - gallery-backend
     environment:
       POSTGRES_DB: photo_cloud
       POSTGRES_USER: photo_user
@@ -22,6 +24,8 @@ services:
     image: minio/minio:latest
     container_name: photo-minio
     restart: unless-stopped
+    networks:
+      - gallery-backend
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minio
@@ -42,6 +46,8 @@ services:
       context: ./analysis-service
     container_name: photo-analysis
     restart: unless-stopped
+    networks:
+      - gallery-backend
     environment:
       ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-mock}
       YOLO_MODEL: ${YOLO_MODEL:-yolov8n.pt}
@@ -57,3 +63,7 @@ services:
 volumes:
   postgres_data_v3:
   minio_data_v3:
+
+networks:
+  gallery-backend:
+    name: smart-gallery-network

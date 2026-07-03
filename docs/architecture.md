@@ -13,7 +13,7 @@ Current code boundaries:
 - `metadata`: image metadata extraction and initial metadata-based tagging.
 - `processing`: async post-upload queue and processing jobs.
 - `realtime`: WebSocket/STOMP notifications for library changes.
-- `analysis`: image analysis port with a lightweight sidecar by default and an optional PaddleOCR + YOLO override.
+- `analysis`: image analysis port backed by a sidecar that attempts YOLO/OCR analysis and falls back deterministically for the current known fixture images.
 
 This means the project is not pretending to be a full distributed system yet, but it is already structured around service boundaries instead of a flat CRUD backend.
 
@@ -63,7 +63,8 @@ Terminates TLS, enforces public API policy, forwards traffic to internal service
 
 ## Current limitations
 
-- Default Docker runtime uses the real YOLO + PaddleOCR analysis provider. A mock override is available through `docker-compose.mock.yml`.
+- Default Docker runtime uses the analysis sidecar with YOLO + PaddleOCR enabled. A mock override is available through `docker-compose.mock.yml`.
+- For the current repository state, the sidecar also contains deterministic fallback mappings for the known manual test images, so behavior on those files is partly fixture-driven.
 - Video thumbnails are not generated yet, so clients should render a placeholder preview for videos.
 - The codebase is still one deployable service. The architecture is microservice-oriented, not fully split.
 - Video processing is intentionally minimal: storage only, no deep analysis.

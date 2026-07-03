@@ -243,6 +243,11 @@ Search matches both metadata-generated tags and user-added tags.
 
 If auto-tagging is enabled in the analysis sidecar, AI-generated tags are included too.
 
+Current implementation note:
+
+- for ordinary uploads, analysis comes from the sidecar;
+- for the repository's known manual test fixture images, the sidecar may return deterministic fallback tags/text to keep validation stable.
+
 ## Search media by people
 
 `GET /api/media?person=<name>`
@@ -445,6 +450,12 @@ Response:
 
 - processed `MediaResponse`
 - `thumbnailBase64`
+
+Important note:
+
+- this is a manual verification endpoint, not the normal client upload path;
+- it uploads the file and then forces immediate processing in the same request;
+- if background queue scheduling is enabled at the same time, local test runs can hit queue contention on the same asset.
 
 ### Download stored original through the test API
 

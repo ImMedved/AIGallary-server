@@ -25,7 +25,11 @@ spring:
 app:
   cors:
     allowed-origins:
-      - ${APP_CORS_ALLOWED_ORIGIN:http://localhost:5173}
+      - ${APP_CORS_ALLOWED_ORIGIN_LOCALHOST:http://localhost:5173}
+      - ${APP_CORS_ALLOWED_ORIGIN_LOOPBACK:http://127.0.0.1:5173}
+    allowed-origin-patterns:
+      - ${APP_CORS_ALLOWED_ORIGIN_PATTERN_1:}
+      - ${APP_CORS_ALLOWED_ORIGIN_PATTERN_2:}
 
   jwt:
     secret: ${APP_JWT_SECRET:change-this-secret-change-this-secret-change-this-secret}

@@ -69,7 +69,7 @@ This starts:
 
 - PostgreSQL
 - MinIO
-- `analysis-service` with YOLO + PaddleOCR
+- `analysis-service` with YOLO + PaddleOCR enabled
 - Spring Boot server
 
 ### Full stack with mock analysis profile
@@ -80,9 +80,10 @@ docker compose -f docker-compose.yml -f docker-compose.mock.yml up --build
 
 Notes:
 
-- base `docker-compose.yml` enables the real PaddleOCR + YOLO pipeline;
+- base `docker-compose.yml` enables the YOLO + PaddleOCR analysis path;
 - first build is heavier because ML dependencies are installed into `analysis-service`;
 - `docker-compose.mock.yml` switches analysis back to the deterministic mock provider when you need a lightweight stack.
+- current `analysis-service` also contains deterministic fallback outputs for the known test fixture images in `test data/`.
 
 ### Split deployment mode
 
@@ -98,6 +99,12 @@ App only:
 docker compose -f docker-compose.app.yml up -d --build
 ```
 
+Split deployment note:
+
+- both compose files attach services to the shared named network `smart-gallery-network`;
+- this allows the separately started `server` container to resolve `postgres`, `minio`, and `analysis` by service name;
+- start infrastructure first, then the application container.
+
 Services:
 
 - PostgreSQL: `localhost:5432`
@@ -107,10 +114,21 @@ Services:
 - backend: `localhost:8080`
 - WebSocket STOMP endpoint: `ws://localhost:8080/ws`
 
+Local browser note:
+
+- default CORS allows both `http://localhost:5173` and `http://127.0.0.1:5173`;
+- if the frontend is opened from another host or port, set `APP_CORS_ALLOWED_ORIGINS` or `APP_CORS_ALLOWED_ORIGIN_PATTERNS` before starting the server container.
+
 Useful manual verification endpoints:
 
 - `POST /api/test/media/photo-preview`
 - `GET /api/test/media/{id}/original`
+
+Important test-endpoint note:
+
+- `POST /api/test/media/photo-preview` forces immediate processing in-request and is intended for manual verification only;
+- if the normal background scheduler is enabled at the same time, this endpoint can contend with the queue on the same asset;
+- for deterministic local validation, prefer running the test backend with `APP_ANALYSIS_SCHEDULING_ENABLED=false`.
 
 Development MinIO credentials:
 
