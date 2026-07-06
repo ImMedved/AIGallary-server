@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import numpy as np
 from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Request
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
 from pydantic import BaseModel, Field
 
@@ -25,6 +26,7 @@ logging.basicConfig(
 
 app = FastAPI(title="smart-gallery-analysis", version="2.0.0")
 logger = logging.getLogger("smart-gallery-analysis")
+job_logger = logging.getLogger("smart-gallery-analysis.jobs")
 
 TRANSPORT_LABELS = {"bicycle", "car", "motorbike", "bus", "train", "truck", "boat", "airplane"}
 ANIMAL_LABELS = {"bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"}
@@ -277,6 +279,35 @@ def now_ms() -> int:
 
 def elapsed_ms(start_ms: int) -> int:
     return max(0, now_ms() - start_ms)
+
+
+@app.middleware("http")
+async def api_request_logging_middleware(request: Request, call_next):
+    path = request.url.path
+    if path == "/health":
+        return await call_next(request)
+
+    started_at = now_ms()
+    job_logger.info("API request started method=%s path=%s", request.method, path)
+    try:
+        response = await call_next(request)
+        job_logger.info(
+            "API request completed method=%s path=%s status=%s durationMs=%s",
+            request.method,
+            path,
+            response.status_code,
+            elapsed_ms(started_at),
+        )
+        return response
+    except Exception as exception:
+        job_logger.exception(
+            "API request failed method=%s path=%s durationMs=%s error=%s",
+            request.method,
+            path,
+            elapsed_ms(started_at),
+            exception,
+        )
+        raise
 
 
 @lru_cache(maxsize=1)
@@ -856,13 +887,14 @@ async def analyze(
         provider=provider_name(),
         imageKind=image_kind,
     )
+    job_id = short_checksum(checksum)
 
-    logger.info(
-        "Analyze request filename='%s' contentType='%s' bytes=%s checksum=%s size=%sx%s topTags=%s fixtureHit=%s provider=%s kind=%s enhance=%s",
+    job_logger.info(
+        "Analysis job started jobId=%s filename='%s' contentType='%s' bytes=%s size=%sx%s topTags=%s fixtureHit=%s provider=%s kind=%s enhance=%s",
+        job_id,
         file.filename,
         file.content_type,
         len(content),
-        short_checksum(checksum),
         image.width,
         image.height,
         topTags,
@@ -872,25 +904,36 @@ async def analyze(
         enhance,
     )
 
-    recognized_text, ocr_blocks = detect_text(image, fixture, debug)
-    caption = generate_caption_with_ollama(image.copy(), debug) if enhance else None
-    tags = detect_tags(image, max(1, min(topTags, 20)), fixture, recognized_text, caption, debug)
-    debug.timingsMs["total"] = elapsed_ms(total_start)
-    save_debug_payload(debug)
+    try:
+        recognized_text, ocr_blocks = detect_text(image, fixture, debug)
+        caption = generate_caption_with_ollama(image.copy(), debug) if enhance else None
+        tags = detect_tags(image, max(1, min(topTags, 20)), fixture, recognized_text, caption, debug)
+        debug.timingsMs["total"] = elapsed_ms(total_start)
+        save_debug_payload(debug)
 
-    logger.info(
-        "Analyze completed checksum=%s recognizedText='%s' caption='%s' tags=%s totalMs=%s",
-        short_checksum(checksum),
-        preview_text(recognized_text),
-        preview_text(caption),
-        serialize_tags(tags),
-        debug.timingsMs.get("total"),
-    )
+        job_logger.info(
+            "Analysis job completed jobId=%s recognizedText='%s' caption='%s' tags=%s totalMs=%s",
+            job_id,
+            preview_text(recognized_text),
+            preview_text(caption),
+            serialize_tags(tags),
+            debug.timingsMs.get("total"),
+        )
 
-    return AnalyzeResponse(
-        tags=tags,
-        recognizedText=recognized_text,
-        caption=caption,
-        ocrBlocks=ocr_blocks if includeDebug or include_debug_by_default() else None,
-        debug=debug if includeDebug or include_debug_by_default() else None,
-    )
+        return AnalyzeResponse(
+            tags=tags,
+            recognizedText=recognized_text,
+            caption=caption,
+            ocrBlocks=ocr_blocks if includeDebug or include_debug_by_default() else None,
+            debug=debug if includeDebug or include_debug_by_default() else None,
+        )
+    except Exception as exception:
+        debug.timingsMs["total"] = elapsed_ms(total_start)
+        job_logger.exception(
+            "Analysis job failed jobId=%s filename='%s' totalMs=%s error=%s",
+            job_id,
+            file.filename,
+            debug.timingsMs.get("total"),
+            exception,
+        )
+        raise

@@ -10,6 +10,8 @@ import com.photocloud.repository.MediaTagRepository;
 import com.photocloud.repository.MediaVariantRepository;
 import com.photocloud.storage.ObjectStorage;
 import com.photocloud.storage.StoredObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +24,8 @@ import java.util.List;
 
 @Service
 public class MediaProcessingQueueService {
+
+    private static final Logger log = LoggerFactory.getLogger(MediaProcessingQueueService.class);
 
     private final MediaProcessingJobRepository mediaProcessingJobRepository;
     private final MediaAssetRepository mediaAssetRepository;
@@ -82,6 +86,13 @@ public class MediaProcessingQueueService {
         job.setAvailableAt(Instant.now());
         job.setLastError(null);
         mediaProcessingJobRepository.save(job);
+        log.info(
+                "Media processing job queued jobAssetId={} assetUuid={} ownerId={} status={}",
+                asset.getId(),
+                asset.getUuid(),
+                asset.getOwnerId(),
+                job.getStatus()
+        );
     }
 
     @Scheduled(fixedDelayString = "${app.analysis.processing.poll-delay-ms:2000}")
@@ -108,18 +119,34 @@ public class MediaProcessingQueueService {
             job.setStatus(ProcessingJobStatus.FAILED);
             job.setLastError("Asset no longer exists");
             job.setCompletedAt(Instant.now());
+            log.warn("Media processing job failed jobAssetId={} reason=asset-no-longer-exists", job.getAssetId());
             return;
         }
 
         job.setStatus(ProcessingJobStatus.RUNNING);
         job.setStartedAt(Instant.now());
         asset.setProcessingStatus(ProcessingStatus.PROCESSING);
+        Instant startedAt = Instant.now();
+        log.info(
+                "Media processing job started jobAssetId={} assetUuid={} attempt={} scheduled=true",
+                asset.getId(),
+                asset.getUuid(),
+                job.getAttempts() + 1
+        );
 
         try {
             processAsset(asset);
             job.setStatus(ProcessingJobStatus.COMPLETED);
             job.setCompletedAt(Instant.now());
             job.setLastError(null);
+            log.info(
+                    "Media processing job completed jobAssetId={} assetUuid={} analysisStatus={} processingStatus={} durationMs={}",
+                    asset.getId(),
+                    asset.getUuid(),
+                    asset.getAnalysisStatus(),
+                    asset.getProcessingStatus(),
+                    job.getCompletedAt().toEpochMilli() - startedAt.toEpochMilli()
+            );
         } catch (Exception exception) {
             job.setAttempts(job.getAttempts() + 1);
             if (job.getAttempts() >= analysisProperties.getProcessing().getMaxAttempts()) {
@@ -127,9 +154,27 @@ public class MediaProcessingQueueService {
                 job.setCompletedAt(Instant.now());
                 asset.setProcessingStatus(ProcessingStatus.FAILED);
                 asset.setAnalysisStatus(AnalysisStatus.FAILED);
+                log.error(
+                        "Media processing job failed jobAssetId={} assetUuid={} attempt={} maxAttempts={} durationMs={} error={}",
+                        asset.getId(),
+                        asset.getUuid(),
+                        job.getAttempts(),
+                        analysisProperties.getProcessing().getMaxAttempts(),
+                        job.getCompletedAt().toEpochMilli() - startedAt.toEpochMilli(),
+                        exception.getMessage(),
+                        exception
+                );
             } else {
                 job.setStatus(ProcessingJobStatus.PENDING);
                 job.setAvailableAt(Instant.now().plusSeconds(job.getAttempts() * 10L));
+                log.warn(
+                        "Media processing job retry scheduled jobAssetId={} assetUuid={} attempt={} nextAvailableAt={} error={}",
+                        asset.getId(),
+                        asset.getUuid(),
+                        job.getAttempts(),
+                        job.getAvailableAt(),
+                        exception.getMessage()
+                );
             }
             job.setLastError(exception.getMessage());
         }
@@ -147,12 +192,27 @@ public class MediaProcessingQueueService {
         MediaAsset asset = mediaAssetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalStateException("Asset not found"));
         asset.setProcessingStatus(ProcessingStatus.PROCESSING);
+        Instant startedAt = Instant.now();
+        log.info(
+                "Media processing job started jobAssetId={} assetUuid={} attempt={} scheduled=false",
+                asset.getId(),
+                asset.getUuid(),
+                job.getAttempts() + 1
+        );
 
         try {
             processAsset(asset);
             job.setStatus(ProcessingJobStatus.COMPLETED);
             job.setCompletedAt(Instant.now());
             job.setLastError(null);
+            log.info(
+                    "Media processing job completed jobAssetId={} assetUuid={} analysisStatus={} processingStatus={} durationMs={}",
+                    asset.getId(),
+                    asset.getUuid(),
+                    asset.getAnalysisStatus(),
+                    asset.getProcessingStatus(),
+                    job.getCompletedAt().toEpochMilli() - startedAt.toEpochMilli()
+            );
         } catch (IOException exception) {
             job.setStatus(ProcessingJobStatus.FAILED);
             job.setCompletedAt(Instant.now());
@@ -160,6 +220,14 @@ public class MediaProcessingQueueService {
             asset.setProcessingStatus(ProcessingStatus.FAILED);
             asset.setAnalysisStatus(AnalysisStatus.FAILED);
             mediaAssetRepository.save(asset);
+            log.error(
+                    "Media processing job failed jobAssetId={} assetUuid={} scheduled=false durationMs={} error={}",
+                    asset.getId(),
+                    asset.getUuid(),
+                    job.getCompletedAt().toEpochMilli() - startedAt.toEpochMilli(),
+                    exception.getMessage(),
+                    exception
+            );
             throw new IllegalStateException("Unable to process asset", exception);
         }
     }
