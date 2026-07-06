@@ -6,4 +6,15 @@ services:
       args:
         INSTALL_ML: "true"
     environment:
-      ANALYSIS_PROVIDER: yolo_paddle
+      ANALYSIS_PROVIDER: yolo_paddle_clip
+      ANALYSIS_SAVE_DEBUG: "true"
+      ANALYSIS_DEBUG_DIR: /analysis-debug
+      ENABLE_CLIP: "true"
+      CLIP_MODEL: ViT-B-32
+      CLIP_PRETRAINED: openai
+      CLIP_TOP_K: "8"
+      CLIP_MIN_CONFIDENCE: "0.12"
+      ENABLE_VLM: "false"
+
+    volumes:
+      - ./analysis-debug:/analysis-debug

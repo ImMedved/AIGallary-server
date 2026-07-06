@@ -130,3 +130,25 @@ Current baseline verification command:
 ```bash
 mvn -q test
 ```
+
+## Local Wi-Fi backend for Android device testing
+
+For direct testing from a phone on the same Wi-Fi network, the repository now includes a lightweight local profile:
+
+```bash
+mvn spring-boot:run -Dspring-boot.run.profiles=localwifi
+```
+
+What this profile does:
+
+- binds the backend to `0.0.0.0:8080`
+- uses a local H2 database instead of PostgreSQL
+- uses filesystem storage under `./storage/localwifi-files`
+- keeps analysis disabled for a predictable base integration flow
+- exposes `GET /actuator/health` for client connection checks
+
+On Android, set the backend URL to your laptop IP, for example:
+
+```text
+http://192.168.0.15:8080
+```

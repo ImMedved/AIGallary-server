@@ -1,5 +1,6 @@
 server:
   port: 8080
+  address: ${SERVER_ADDRESS:0.0.0.0}
   forward-headers-strategy: framework
 
 spring:
@@ -60,3 +61,9 @@ app:
       poll-delay-ms: ${APP_ANALYSIS_POLL_DELAY_MS:2000}
       max-attempts: ${APP_ANALYSIS_MAX_ATTEMPTS:5}
       scheduling-enabled: ${APP_ANALYSIS_SCHEDULING_ENABLED:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

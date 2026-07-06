@@ -52,6 +52,7 @@ services:
       - gallery-backend
     environment:
       ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-yolo_paddle}
+      LOG_LEVEL: ${ANALYSIS_LOG_LEVEL:-INFO}
       YOLO_MODEL: ${YOLO_MODEL:-yolov8s.pt}
       YOLO_CONFIDENCE: ${YOLO_CONFIDENCE:-0.12}
       YOLO_IMAGE_SIZE: ${YOLO_IMAGE_SIZE:-960}
