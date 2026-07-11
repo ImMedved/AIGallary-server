@@ -10,8 +10,6 @@ services:
       POSTGRES_DB: photo_cloud
       POSTGRES_USER: photo_user
       POSTGRES_PASSWORD: photo_password
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data_v3:/var/lib/postgresql/data
     healthcheck:
@@ -50,13 +48,55 @@ services:
     restart: unless-stopped
     networks:
       - gallery-backend
+    mem_limit: ${ANALYSIS_CONTAINER_MEMORY_LIMIT:-5g}
+    memswap_limit: ${ANALYSIS_CONTAINER_MEMORY_LIMIT:-5g}
     environment:
-      ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-yolo_paddle}
-      LOG_LEVEL: ${ANALYSIS_LOG_LEVEL:-INFO}
+      ANALYSIS_PROVIDER: ${ANALYSIS_PROVIDER:-local_ml}
+      ANALYSIS_MODE: ${ANALYSIS_MODE:-quality}
+      ANALYSIS_EXECUTOR: ${ANALYSIS_EXECUTOR:-process}
+      ANALYSIS_RAM_PROFILE: ${ANALYSIS_RAM_PROFILE:-test}
+      ANALYSIS_MEMORY_LIMIT_GB: ${ANALYSIS_MEMORY_LIMIT_GB:-5}
+      ANALYSIS_WORKERS: ${ANALYSIS_WORKERS:-1}
+      ANALYSIS_INTRAOP_THREADS: ${ANALYSIS_INTRAOP_THREADS:-4}
+      ANALYSIS_MAX_PENDING_REQUESTS: ${ANALYSIS_MAX_PENDING_REQUESTS:-2}
+      ANALYSIS_RESULT_CACHE_MB: ${ANALYSIS_RESULT_CACHE_MB:-512}
+      ANALYSIS_PRELOAD_ON_STARTUP: ${ANALYSIS_PRELOAD_ON_STARTUP:-true}
+      ANALYSIS_WARMUP_TIMEOUT_SECONDS: ${ANALYSIS_WARMUP_TIMEOUT_SECONDS:-300}
+      ANALYSIS_LOG_MODE: ${ANALYSIS_LOG_MODE:-production}
+      LOG_LEVEL: ${ANALYSIS_LOG_LEVEL:-WARNING}
+
+      ENABLE_YOLO: ${ENABLE_YOLO:-true}
       YOLO_MODEL: ${YOLO_MODEL:-yolov8s.pt}
-      YOLO_CONFIDENCE: ${YOLO_CONFIDENCE:-0.12}
-      YOLO_IMAGE_SIZE: ${YOLO_IMAGE_SIZE:-960}
+      YOLO_CONFIDENCE: ${YOLO_CONFIDENCE:-0.22}
+      YOLO_IMAGE_SIZE: ${YOLO_IMAGE_SIZE:-768}
+      YOLO_RUN_ON_TEXT_IMAGES: ${YOLO_RUN_ON_TEXT_IMAGES:-false}
+
+      OCR_ENGINE: ${OCR_ENGINE:-easyocr}
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-ru,en}
+      OCR_POLICY: ${OCR_POLICY:-auto}
+      OCR_MAX_SIDE: ${OCR_MAX_SIDE:-2200}
+      OCR_BLOCK_MIN_CONFIDENCE: ${OCR_BLOCK_MIN_CONFIDENCE:-0.42}
       PADDLE_OCR_LANG: ${PADDLE_OCR_LANG:-ru}
+      EASYOCR_GPU: ${EASYOCR_GPU:-false}
+
+      ENABLE_CLIP: ${ENABLE_CLIP:-true}
+      CLIP_MODEL: ${CLIP_MODEL:-ViT-B-32}
+      CLIP_PRETRAINED: ${CLIP_PRETRAINED:-openai}
+      CLIP_MIN_CONFIDENCE: ${CLIP_MIN_CONFIDENCE:-0.58}
+      CLIP_TOP_K: ${CLIP_TOP_K:-10}
+
+      ENABLE_VLM: ${ENABLE_VLM:-false}
+      VLM_MODEL: ${VLM_MODEL:-llava:7b}
+      OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434}
+
+      HF_HOME: /models/huggingface
+      TORCH_HOME: /models/torch
+      EASYOCR_MODULE_PATH: /models/easyocr
+      PADDLE_HOME: /models/paddle
+      TOKENIZERS_PARALLELISM: "false"
+    volumes:
+      - analysis_model_cache:/models
+      - analysis_debug:/tmp/smart-gallery-analysis-debug
     ports:
       - "8090:8090"
     healthcheck:
@@ -64,6 +104,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
+      start_period: 120s
 
   server:
     build: .
@@ -96,11 +137,13 @@ services:
       APP_MEDIA_DOWNLOAD_TOKEN_EXPIRATION_MS: ${APP_MEDIA_DOWNLOAD_TOKEN_EXPIRATION_MS:-900000}
       APP_JWT_SECRET: ${APP_JWT_SECRET:-change-this-secret-change-this-secret-change-this-secret}
     ports:
-      - "8080:8080"
+      - "8081:8080"
 
 volumes:
   postgres_data_v3:
   minio_data_v3:
+  analysis_model_cache:
+  analysis_debug:
 
 networks:
   gallery-backend:

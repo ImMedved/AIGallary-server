@@ -2,3 +2,5 @@ ultralytics==8.3.0
 paddlepaddle==3.1.1
 paddleocr==3.0.3
 paddlex==3.0.3
+open-clip-torch==2.26.1
+easyocr==1.7.2

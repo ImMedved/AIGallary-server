@@ -72,12 +72,11 @@ public class AuthService {
     }
 
     private String issueToken(AppUser user) {
-        userSessionRepository.deactivateActiveSessions(user.getId(), Instant.now());
-
         UserSession session = new UserSession();
         session.setUserId(user.getId());
         session.setSessionId(UUID.randomUUID());
         session.setActive(true);
+        session.setInvalidatedAt(null);
 
         UserSession savedSession = userSessionRepository.save(session);
         return jwtService.generateToken(user.getId(), user.getLogin(), savedSession.getSessionId());

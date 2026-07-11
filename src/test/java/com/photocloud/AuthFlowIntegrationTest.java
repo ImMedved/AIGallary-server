@@ -26,7 +26,7 @@ class AuthFlowIntegrationTest {
     private ObjectMapper objectMapper;
 
     @Test
-    void shouldInvalidatePreviousSessionTokenAfterNewLogin() throws Exception {
+    void shouldKeepPreviousSessionTokenActiveAfterNewLogin() throws Exception {
         String login = "auth-user";
         String password = "secret123";
 
@@ -38,7 +38,7 @@ class AuthFlowIntegrationTest {
 
         mockMvc.perform(get("/api/media")
                         .header("Authorization", "Bearer " + registerToken))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/media")
                         .header("Authorization", "Bearer " + loginToken))
