@@ -1,0 +1,8 @@
+{
+  "imageKind": "screenshot",
+  "expectedText": "SETTINGS PANEL 20 IMPORT MEDIA SERVICE RETURN STATUS OK",
+  "requiredTags": ["screenshot", "text"],
+  "allowedTags": ["document", "web page", "code screenshot", "chat screenshot", "latin text", "message"],
+  "forbiddenTags": ["receipt", "car"],
+  "notes": "Synthetic screenshot baseline sample"
+}

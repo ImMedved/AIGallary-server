@@ -1,0 +1,103 @@
+{
+  "tags": [
+    {
+      "value": "screenshot",
+      "confidence": 0.72,
+      "source": "SYSTEM",
+      "reason": "image kind classifier"
+    },
+    {
+      "value": "image",
+      "confidence": 0.62,
+      "source": "FALLBACK",
+      "reason": "minimum tag fallback"
+    }
+  ],
+  "ocrBlocks": [],
+  "debug": {
+    "checksum": "4dd7b2a04d36ee59dd94cb6e838bf089632258aabb28260bb154553a93ee6a9c",
+    "filename": "photo-plain-03.png",
+    "imageWidth": 1280,
+    "imageHeight": 860,
+    "provider": "local_ml",
+    "mode": "fast",
+    "imageKind": "screenshot",
+    "pipelineStatus": "SEARCHABLE",
+    "enrichmentScheduled": true,
+    "timingsMs": {
+      "ocr": 26256,
+      "yolo": 0,
+      "clip": 0,
+      "total": 26285
+    },
+    "ocrCandidates": [
+      {
+        "name": "easyocr:base",
+        "width": 1637,
+        "height": 1100,
+        "lineCount": 0,
+        "charCount": 0,
+        "validCharRatio": 0.0,
+        "mixedScriptTokenRatio": 0.0,
+        "repetitionRatio": 0.0,
+        "languagePlausibility": 0.0,
+        "geometryScore": 0.0,
+        "lineConsistency": 0.3,
+        "score": 0.0,
+        "accepted": false,
+        "rejectionReason": "no text blocks"
+      },
+      {
+        "name": "easyocr:gray_autocontrast",
+        "width": 1637,
+        "height": 1100,
+        "lineCount": 0,
+        "charCount": 0,
+        "validCharRatio": 0.0,
+        "mixedScriptTokenRatio": 0.0,
+        "repetitionRatio": 0.0,
+        "languagePlausibility": 0.0,
+        "geometryScore": 0.0,
+        "lineConsistency": 0.3,
+        "score": 0.0,
+        "accepted": false,
+        "rejectionReason": "no text blocks"
+      },
+      {
+        "name": "easyocr:threshold",
+        "width": 1637,
+        "height": 1100,
+        "lineCount": 0,
+        "charCount": 0,
+        "validCharRatio": 0.0,
+        "mixedScriptTokenRatio": 0.0,
+        "repetitionRatio": 0.0,
+        "languagePlausibility": 0.0,
+        "geometryScore": 0.0,
+        "lineConsistency": 0.3,
+        "score": 0.0,
+        "accepted": false,
+        "rejectionReason": "no text blocks"
+      }
+    ],
+    "ocrBlocks": [],
+    "rawYoloLabels": [],
+    "clipScores": [],
+    "finalTagReasons": [
+      {
+        "value": "screenshot",
+        "confidence": 0.72,
+        "source": "SYSTEM",
+        "reason": "image kind classifier"
+      },
+      {
+        "value": "image",
+        "confidence": 0.62,
+        "source": "FALLBACK",
+        "reason": "minimum tag fallback"
+      }
+    ],
+    "errors": [],
+    "warnings": []
+  }
+}

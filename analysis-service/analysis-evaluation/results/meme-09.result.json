@@ -1,0 +1,248 @@
+{
+  "tags": [
+    {
+      "value": "latin text",
+      "confidence": 0.74,
+      "source": "OCR",
+      "reason": "recognized text contains Latin"
+    },
+    {
+      "value": "screenshot",
+      "confidence": 0.72,
+      "source": "SYSTEM",
+      "reason": "image kind classifier"
+    },
+    {
+      "value": "document",
+      "confidence": 0.72,
+      "source": "SYSTEM",
+      "reason": "image kind classifier"
+    },
+    {
+      "value": "text",
+      "confidence": 0.84,
+      "source": "OCR",
+      "reason": "OCR recognized non-empty text"
+    }
+  ],
+  "recognizedText": "WHEN BUILD CACHE HITS 9\nAND DOGKER FINALLY BEHAVES",
+  "ocr": {
+    "rawText": "WHEN BUILD CACHE HITS 9\nAND DOGKER FINALLY BEHAVES",
+    "displayText": "WHEN BUILD CACHE HITS 9\nAND DOGKER FINALLY BEHAVES",
+    "searchText": "when build cache hits 9\nand dogker finally behaves",
+    "languageHints": [
+      "en"
+    ],
+    "averageConfidence": 0.7776,
+    "quality": "strong",
+    "blocks": [
+      {
+        "rawText": "WHEN BUILD CACHE HITS 9",
+        "displayText": "WHEN BUILD CACHE HITS 9",
+        "searchText": "when build cache hits 9",
+        "confidence": 0.8168339429965765,
+        "bbox": [
+          182.0,
+          46.0,
+          844.0,
+          100.0
+        ],
+        "language": "en",
+        "engine": "easyocr",
+        "variant": "base",
+        "correctionTrace": [],
+        "text": "WHEN BUILD CACHE HITS 9"
+      },
+      {
+        "rawText": "AND DOGKER FINALLY BEHAVES",
+        "displayText": "AND DOGKER FINALLY BEHAVES",
+        "searchText": "and dogker finally behaves",
+        "confidence": 0.7382862598941982,
+        "bbox": [
+          118.0,
+          916.0,
+          912.0,
+          970.0
+        ],
+        "language": "en",
+        "engine": "easyocr",
+        "variant": "base",
+        "correctionTrace": [],
+        "text": "AND DOGKER FINALLY BEHAVES"
+      }
+    ],
+    "warnings": []
+  },
+  "ocrBlocks": [
+    {
+      "rawText": "WHEN BUILD CACHE HITS 9",
+      "displayText": "WHEN BUILD CACHE HITS 9",
+      "searchText": "when build cache hits 9",
+      "confidence": 0.8168339429965765,
+      "bbox": [
+        182.0,
+        46.0,
+        844.0,
+        100.0
+      ],
+      "language": "en",
+      "engine": "easyocr",
+      "variant": "base",
+      "correctionTrace": [],
+      "text": "WHEN BUILD CACHE HITS 9"
+    },
+    {
+      "rawText": "AND DOGKER FINALLY BEHAVES",
+      "displayText": "AND DOGKER FINALLY BEHAVES",
+      "searchText": "and dogker finally behaves",
+      "confidence": 0.7382862598941982,
+      "bbox": [
+        118.0,
+        916.0,
+        912.0,
+        970.0
+      ],
+      "language": "en",
+      "engine": "easyocr",
+      "variant": "base",
+      "correctionTrace": [],
+      "text": "AND DOGKER FINALLY BEHAVES"
+    }
+  ],
+  "debug": {
+    "checksum": "611840fc2f4d19c590f7084c8dff62d82dccc36f4e43a4a7c824c4e6d107a436",
+    "filename": "meme-09.png",
+    "imageWidth": 1024,
+    "imageHeight": 1024,
+    "provider": "local_ml",
+    "mode": "fast",
+    "imageKind": "screenshot",
+    "pipelineStatus": "SEARCHABLE",
+    "enrichmentScheduled": true,
+    "timingsMs": {
+      "ocr": 16386,
+      "yolo": 0,
+      "clip": 0,
+      "total": 16418
+    },
+    "ocrCandidates": [
+      {
+        "name": "easyocr:base",
+        "width": 1024,
+        "height": 1024,
+        "lineCount": 2,
+        "charCount": 50,
+        "averageConfidence": 0.7776,
+        "validCharRatio": 1.0,
+        "mixedScriptTokenRatio": 0.0,
+        "repetitionRatio": 0.0204,
+        "languagePlausibility": 0.8889,
+        "geometryScore": 0.9418,
+        "lineConsistency": 0.9963,
+        "score": 186.0583,
+        "accepted": true,
+        "preview": "WHEN BUILD CACHE HITS 9 AND DOGKER FINALLY BEHAVES"
+      },
+      {
+        "name": "easyocr:gray_autocontrast",
+        "width": 1024,
+        "height": 1024,
+        "lineCount": 2,
+        "charCount": 50,
+        "averageConfidence": 0.6984,
+        "validCharRatio": 1.0,
+        "mixedScriptTokenRatio": 0.0,
+        "repetitionRatio": 0.0204,
+        "languagePlausibility": 0.8889,
+        "geometryScore": 0.9411,
+        "lineConsistency": 0.9963,
+        "score": 178.1321,
+        "accepted": true,
+        "preview": "WHEN BUILD CACHE HITS 9 AND DOGKER FINALLY BEHAVES"
+      },
+      {
+        "name": "easyocr:threshold",
+        "width": 1024,
+        "height": 1024,
+        "lineCount": 2,
+        "charCount": 49,
+        "averageConfidence": 0.7003,
+        "validCharRatio": 1.0,
+        "mixedScriptTokenRatio": 0.0,
+        "repetitionRatio": 0.0208,
+        "languagePlausibility": 0.875,
+        "geometryScore": 0.9404,
+        "lineConsistency": 0.9983,
+        "score": 177.5318,
+        "accepted": true,
+        "preview": "WHEN BUILD CACHE HITS 9 AND DO@KER FINALLYBEHAMES"
+      }
+    ],
+    "ocrBlocks": [
+      {
+        "rawText": "WHEN BUILD CACHE HITS 9",
+        "displayText": "WHEN BUILD CACHE HITS 9",
+        "searchText": "when build cache hits 9",
+        "confidence": 0.8168339429965765,
+        "bbox": [
+          182.0,
+          46.0,
+          844.0,
+          100.0
+        ],
+        "language": "en",
+        "engine": "easyocr",
+        "variant": "base",
+        "correctionTrace": [],
+        "text": "WHEN BUILD CACHE HITS 9"
+      },
+      {
+        "rawText": "AND DOGKER FINALLY BEHAVES",
+        "displayText": "AND DOGKER FINALLY BEHAVES",
+        "searchText": "and dogker finally behaves",
+        "confidence": 0.7382862598941982,
+        "bbox": [
+          118.0,
+          916.0,
+          912.0,
+          970.0
+        ],
+        "language": "en",
+        "engine": "easyocr",
+        "variant": "base",
+        "correctionTrace": [],
+        "text": "AND DOGKER FINALLY BEHAVES"
+      }
+    ],
+    "rawYoloLabels": [],
+    "clipScores": [],
+    "finalTagReasons": [
+      {
+        "value": "latin text",
+        "confidence": 0.74,
+        "source": "OCR",
+        "reason": "recognized text contains Latin"
+      },
+      {
+        "value": "screenshot",
+        "confidence": 0.72,
+        "source": "SYSTEM",
+        "reason": "image kind classifier"
+      },
+      {
+        "value": "document",
+        "confidence": 0.72,
+        "source": "SYSTEM",
+        "reason": "image kind classifier"
+      },
+      {
+        "value": "text",
+        "confidence": 0.84,
+        "source": "OCR",
+        "reason": "OCR recognized non-empty text"
+      }
+    ],
+    "errors": [],
+    "warnings": []
+  }
+}

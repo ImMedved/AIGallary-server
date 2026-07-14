@@ -1,0 +1,8 @@
+{
+  "imageKind": "document",
+  "expectedText": "INVOICE 2 CLIENT SMART GALLERY TOTAL 122 EUR",
+  "requiredTags": ["document", "text"],
+  "allowedTags": ["latin text"],
+  "forbiddenTags": ["car", "animal"],
+  "notes": "Synthetic document or scan sample"
+}

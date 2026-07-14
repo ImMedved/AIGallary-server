@@ -1,0 +1,8 @@
+{
+  "imageKind": "natural_photo_with_text",
+  "expectedText": "OPEN AIR MARKET 14",
+  "requiredTags": ["photo", "text"],
+  "allowedTags": ["latin text", "people", "outdoor"],
+  "forbiddenTags": ["receipt"],
+  "notes": "Synthetic natural photo with visible text"
+}

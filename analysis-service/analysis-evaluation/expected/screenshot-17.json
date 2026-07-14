@@ -1,0 +1,8 @@
+{
+  "imageKind": "screenshot",
+  "expectedText": "SETTINGS PANEL 17 PROFILE AUTO SAVE ENABLED SYNC STATUS OK 27",
+  "requiredTags": ["screenshot", "text"],
+  "allowedTags": ["document", "web page", "code screenshot", "chat screenshot", "latin text"],
+  "forbiddenTags": ["receipt", "car"],
+  "notes": "Synthetic screenshot baseline sample"
+}

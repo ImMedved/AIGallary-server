@@ -1,0 +1,8 @@
+{
+  "imageKind": "ordinary_photo",
+  "expectedText": "",
+  "requiredTags": ["photo"],
+  "allowedTags": ["animal", "photo"],
+  "forbiddenTags": ["receipt", "document", "text"],
+  "notes": "Synthetic ordinary photo without visible text"
+}

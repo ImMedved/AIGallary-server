@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Smart Gallery Analysis Expected Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "imageKind",
+    "expectedText",
+    "requiredTags",
+    "allowedTags",
+    "forbiddenTags"
+  ],
+  "properties": {
+    "imageKind": {
+      "type": "string",
+      "enum": [
+        "screenshot",
+        "meme",
+        "document",
+        "natural_photo_with_text",
+        "ordinary_photo",
+        "difficult"
+      ]
+    },
+    "expectedText": {
+      "type": "string"
+    },
+    "requiredTags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowedTags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "forbiddenTags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "imageKind": "difficult",
+  "expectedText": "LOW LIGHT SAMPLE 2",
+  "requiredTags": ["photo", "text"],
+  "allowedTags": ["difficult", "latin text"],
+  "forbiddenTags": ["receipt"],
+  "notes": "Synthetic difficult or low-quality sample"
+}

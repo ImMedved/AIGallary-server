@@ -1,0 +1,8 @@
+{
+  "imageKind": "meme",
+  "expectedText": "WHEN BUILD CACHE HITS 2 AND DOCKER FINALLY BEHAVES",
+  "requiredTags": ["meme", "text"],
+  "allowedTags": ["people", "photo", "latin text"],
+  "forbiddenTags": ["receipt"],
+  "notes": "Synthetic meme baseline sample"
+}
