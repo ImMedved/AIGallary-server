@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from .image_utils import checksum_sha256, classify_image_kind, open_image, short_checksum
-from .ocr import detect_text
+from .metrics import AnalysisMetrics
+from .ocr_runtime import detect_text
 from .runtime import elapsed_ms, now_ms, preview_text
 from .schemas import AnalysisDebugPayload, AnalyzeResponse
 from .settings import AnalysisMode, OcrPolicy, Settings, load_settings
@@ -86,6 +87,15 @@ def detect_tags(
     return final_tags
 
 
+def record_metrics(debug: AnalysisDebugPayload, tags, metrics: AnalysisMetrics | None, rejected_ocr_blocks: int) -> None:
+    if metrics is None:
+        return
+    metrics.add_ocr_rejected_blocks(rejected_ocr_blocks)
+    metrics.observe_tag_sources([tag.source or "unknown" for tag in tags])
+    for stage, value in debug.timingsMs.items():
+        metrics.observe_stage_ms(stage, value)
+
+
 def analyze_content(
     content: bytes,
     filename: str | None,
@@ -96,8 +106,11 @@ def analyze_content(
     mode: AnalysisMode,
     ocr_policy: OcrPolicy,
     settings: Settings | None = None,
+    metrics: AnalysisMetrics | None = None,
 ) -> AnalyzeResponse:
     settings = settings or load_settings()
+    if metrics is not None:
+        metrics.inc_jobs_total()
     total_start = now_ms()
     checksum = checksum_sha256(content)
     image = open_image(content)
@@ -131,11 +144,14 @@ def analyze_content(
     )
 
     try:
-        recognized_text, ocr_blocks = detect_text(image, fixture_text, debug, settings, mode, ocr_policy)
+        ocr_result, ocr_blocks, rejected_ocr_blocks = detect_text(image, fixture_text, debug, settings, mode, ocr_policy)
+        recognized_text = ocr_result.displayText if ocr_result else None
         caption = generate_caption_with_ollama(image.copy(), debug, settings) if enhance else None
         tags = detect_tags(image, max(1, min(top_tags, 30)), checksum, recognized_text, caption, debug, settings)
+        debug.enrichmentScheduled = True
         debug.timingsMs["total"] = elapsed_ms(total_start)
         save_debug_payload(debug, settings)
+        record_metrics(debug, tags, metrics, rejected_ocr_blocks)
 
         job_logger.info(
             "Analysis job completed jobId=%s status=ok totalMs=%s ocrMs=%s yoloMs=%s clipMs=%s tags=%s textPreview='%s' errors=%s",
@@ -154,11 +170,14 @@ def analyze_content(
             tags=tags,
             recognizedText=recognized_text,
             caption=caption,
+            ocr=ocr_result,
             ocrBlocks=ocr_blocks if with_debug else None,
             debug=debug if with_debug else None,
         )
     except Exception as exception:
         debug.timingsMs["total"] = elapsed_ms(total_start)
+        if metrics is not None:
+            metrics.inc_jobs_failed_total()
         job_logger.exception(
             "Analysis job completed jobId=%s status=failed totalMs=%s error=%s",
             job_id,
@@ -180,5 +199,6 @@ def analyze_content_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         mode=payload.get("mode", settings.mode),
         ocr_policy=payload.get("ocr_policy", settings.ocr_policy),
         settings=settings,
+        metrics=None,
     )
     return response.model_dump(mode="json")

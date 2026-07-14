@@ -75,8 +75,16 @@ def fixture_tags(checksum: str) -> tuple[list[TagCandidate], str | None]:
 
 def system_tag_candidates(image_kind: str, recognized_text: str | None) -> list[TagCandidate]:
     tags = [TagCandidate(value=image_kind, confidence=0.72, source="SYSTEM", reason="image kind classifier", priority=0.02)]
-    if image_kind == "photo":
+    if image_kind == "natural_photo":
         tags.append(TagCandidate(value="photo", confidence=0.70, source="SYSTEM", reason="image kind classifier"))
+    if image_kind == "receipt":
+        tags.append(TagCandidate(value="document", confidence=0.74, source="SYSTEM", reason="receipt subtype classifier"))
+    if image_kind == "code_screenshot":
+        tags.append(TagCandidate(value="screenshot", confidence=0.76, source="SYSTEM", reason="code screenshot subtype classifier"))
+        tags.append(TagCandidate(value="code screenshot", confidence=0.82, source="SYSTEM", reason="code screenshot subtype classifier"))
+    if image_kind == "chat_screenshot":
+        tags.append(TagCandidate(value="screenshot", confidence=0.76, source="SYSTEM", reason="chat screenshot subtype classifier"))
+        tags.append(TagCandidate(value="chat screenshot", confidence=0.82, source="SYSTEM", reason="chat screenshot subtype classifier"))
     if recognized_text:
         lowered = recognized_text.lower()
         tags.append(TagCandidate(value="text", confidence=0.84, source="OCR", reason="OCR recognized non-empty text", priority=0.05))

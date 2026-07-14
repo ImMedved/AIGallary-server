@@ -10,6 +10,8 @@ from functools import lru_cache
 
 from PIL import Image
 
+from .errors import ModelUnavailableError
+from .models.registry import ModelRegistry
 from .runtime import elapsed_ms, now_ms, preview_text
 from .schemas import AnalysisDebugPayload, ClipCandidateDebug, YoloDetectionDebug
 from .settings import Settings
@@ -19,12 +21,23 @@ from .tags_data import DEFAULT_CLIP_TAGS
 logger = logging.getLogger("smart_gallery_analysis.vision")
 
 
+def _ensure_model_available(settings: Settings, name: str) -> None:
+    statuses = {status.name: status for status in ModelRegistry(settings).collect_statuses(verify_checksum=False)}
+    status = statuses.get(name)
+    if status is None:
+        return
+    if status.ready or settings.allow_model_download:
+        return
+    raise ModelUnavailableError(f"Required model '{name}' is not available in {settings.model_cache_dir}. Run the explicit download command first.")
+
+
 @lru_cache(maxsize=4)
-def load_yolo_model(model_name: str, classes_key: str):
+def _load_yolo_model_cached(model_name: str, classes_key: str, local_model_path: str):
     from ultralytics import YOLO
 
     logger.info("Loading YOLO model %s", model_name)
-    model = YOLO(model_name)
+    target_model = local_model_path or model_name
+    model = YOLO(target_model)
     classes = [item for item in classes_key.split("|") if item]
     if classes and "world" in model_name.lower() and hasattr(model, "set_classes"):
         logger.info("Setting YOLO-World classes: %s", classes)
@@ -32,17 +45,40 @@ def load_yolo_model(model_name: str, classes_key: str):
     return model
 
 
+def load_yolo_model(settings: Settings):
+    _ensure_model_available(settings, "yolo")
+    local_candidate = settings.yolo_config_dir / settings.yolo_model
+    if settings.allow_model_download:
+        local_candidate.parent.mkdir(parents=True, exist_ok=True)
+    return _load_yolo_model_cached(settings.yolo_model, "|".join(settings.yolo_world_classes), str(local_candidate) if (local_candidate.exists() or settings.allow_model_download) else "")
+
+
 @lru_cache(maxsize=4)
-def load_clip_model(model_name: str, pretrained_name: str):
+def _load_clip_model_cached(model_name: str, pretrained_name: str):
     import open_clip
     import torch
 
     logger.info("Loading OpenCLIP model=%s pretrained=%s", model_name, pretrained_name)
     model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained_name)
-    tokenizer = open_clip.get_tokenizer(model_name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device).eval()
-    return model, preprocess, tokenizer, device
+    return model, preprocess, device
+
+
+def load_clip_model(settings: Settings):
+    _ensure_model_available(settings, "clip")
+    return _load_clip_model_cached(settings.clip_model, settings.clip_pretrained)
+
+
+@lru_cache(maxsize=16)
+def build_clip_prompt_inputs(model_name: str, image_kind: str, tags_key: str, device: str):
+    import open_clip
+
+    tokenizer = open_clip.get_tokenizer(model_name)
+    tags = [item for item in tags_key.split("\n") if item]
+    prompts: list[tuple[str, str]] = [(tag, clip_prompt(tag, image_kind)) for tag in tags]
+    text_input = tokenizer([prompt for _, prompt in prompts]).to(device)
+    return prompts, text_input
 
 
 def yolo_tag_candidates(image: Image.Image, top_tags: int, debug: AnalysisDebugPayload, settings: Settings) -> tuple[list[TagCandidate], dict[str, float], dict[str, int]]:
@@ -60,7 +96,7 @@ def yolo_tag_candidates(image: Image.Image, top_tags: int, debug: AnalysisDebugP
         return candidates, raw_scores, raw_counts
 
     try:
-        model = load_yolo_model(settings.yolo_model, "|".join(settings.yolo_world_classes))
+        model = load_yolo_model(settings)
         results = model.predict(
             source=image,
             verbose=False,
@@ -103,15 +139,19 @@ def yolo_tag_candidates(image: Image.Image, top_tags: int, debug: AnalysisDebugP
     return candidates, raw_scores, raw_counts
 
 
-def clip_prompts(tag: str, image_kind: str) -> list[str]:
-    prompts = [f"a photo of {tag}", f"an image of {tag}"]
-    if image_kind in {"screenshot", "document", "meme"}:
-        prompts.append(f"a screenshot of {tag}")
-    return prompts
+def clip_prompt(tag: str, image_kind: str) -> str:
+    if image_kind == "document":
+        return f"a document containing {tag}"
+    if image_kind in {"screenshot", "meme"}:
+        return f"a screenshot of {tag}"
+    return f"a photo of {tag}"
 
 
 def clip_tag_candidates(image: Image.Image, debug: AnalysisDebugPayload, settings: Settings) -> list[TagCandidate]:
     if not settings.enable_clip or settings.provider == "mock":
+        debug.timingsMs["clip"] = 0
+        return []
+    if debug.imageKind in {"screenshot", "document", "meme"} and not settings.clip_run_on_text_images:
         debug.timingsMs["clip"] = 0
         return []
 
@@ -120,16 +160,14 @@ def clip_tag_candidates(image: Image.Image, debug: AnalysisDebugPayload, setting
     try:
         import torch
 
-        model, preprocess, tokenizer, device = load_clip_model(settings.clip_model, settings.clip_pretrained)
+        model, preprocess, device = load_clip_model(settings)
         tags = settings.clip_tags or DEFAULT_CLIP_TAGS
+        tags_key = "\n".join(tags)
+        prompts, text_input = build_clip_prompt_inputs(settings.clip_model, debug.imageKind, tags_key, device)
 
-        prompts: list[tuple[str, str]] = []
-        for tag in tags:
-            for prompt in clip_prompts(tag, debug.imageKind):
-                prompts.append((tag, prompt))
-
-        image_input = preprocess(image).unsqueeze(0).to(device)
-        text_input = tokenizer([prompt for _, prompt in prompts]).to(device)
+        clip_image = image.copy()
+        clip_image.thumbnail((768, 768))
+        image_input = preprocess(clip_image).unsqueeze(0).to(device)
 
         with torch.no_grad():
             image_features = model.encode_image(image_input)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DetectedTag(BaseModel):
@@ -11,9 +11,34 @@ class DetectedTag(BaseModel):
 
 
 class OcrBlock(BaseModel):
-    text: str
+    rawText: str
+    displayText: str
+    searchText: str
     confidence: float | None = None
     bbox: list[float] | None = None
+    language: str | None = None
+    quality: str | None = None
+    engine: str | None = None
+    variant: str | None = None
+    correctionTrace: list[str] = Field(default_factory=list)
+    text: str | None = None
+
+    @model_validator(mode="after")
+    def ensure_legacy_text(self) -> "OcrBlock":
+        if self.text is None:
+            self.text = self.displayText
+        return self
+
+
+class OcrResult(BaseModel):
+    rawText: str | None = None
+    displayText: str | None = None
+    searchText: str | None = None
+    languageHints: list[str] = Field(default_factory=list)
+    averageConfidence: float | None = None
+    quality: str | None = None
+    blocks: list[OcrBlock] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class OcrCandidateDebug(BaseModel):
@@ -25,6 +50,10 @@ class OcrCandidateDebug(BaseModel):
     averageConfidence: float | None = None
     validCharRatio: float | None = None
     mixedScriptTokenRatio: float | None = None
+    repetitionRatio: float | None = None
+    languagePlausibility: float | None = None
+    geometryScore: float | None = None
+    lineConsistency: float | None = None
     score: float
     accepted: bool = False
     preview: str | None = None
@@ -53,6 +82,8 @@ class AnalysisDebugPayload(BaseModel):
     provider: str
     mode: str
     imageKind: str
+    pipelineStatus: str = "SEARCHABLE"
+    enrichmentScheduled: bool = False
     timingsMs: dict[str, int] = Field(default_factory=dict)
     ocrCandidates: list[OcrCandidateDebug] = Field(default_factory=list)
     ocrBlocks: list[OcrBlock] = Field(default_factory=list)
@@ -61,11 +92,13 @@ class AnalysisDebugPayload(BaseModel):
     finalTagReasons: list[DetectedTag] = Field(default_factory=list)
     vlmCaption: str | None = None
     errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class AnalyzeResponse(BaseModel):
     tags: list[DetectedTag]
     recognizedText: str | None = None
     caption: str | None = None
+    ocr: OcrResult | None = None
     ocrBlocks: list[OcrBlock] | None = None
     debug: AnalysisDebugPayload | None = None

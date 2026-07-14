@@ -5,10 +5,13 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 
 from .cache import ResultCache
+from .errors import AnalysisServiceError, AnalysisTimeoutError, QueueFullError, WorkerPoolUnavailableError
 from .logging_config import configure_logging
+from .metrics import AnalysisMetrics
+from .models.registry import ModelRegistry
 from .runtime import elapsed_ms, now_ms
 from .schemas import AnalyzeResponse
 from .settings import load_settings, resolve_mode, resolve_ocr_policy
@@ -18,9 +21,11 @@ settings = load_settings()
 configure_logging(settings)
 logger = logging.getLogger("smart_gallery_analysis")
 job_logger = logging.getLogger("smart_gallery_analysis.jobs")
+metrics = AnalysisMetrics()
+model_registry = ModelRegistry(settings)
 
 result_cache = ResultCache(settings.result_cache_mb * 1024 * 1024)
-analysis_executor = AnalysisExecutor(settings)
+analysis_executor = AnalysisExecutor(settings, metrics=metrics)
 
 
 def response_from_dict(payload: dict[str, Any]) -> AnalyzeResponse:
@@ -29,7 +34,7 @@ def response_from_dict(payload: dict[str, Any]) -> AnalyzeResponse:
 
 def cache_key(checksum: str, top_tags: int, enhance: bool, mode: str, ocr_policy: str, include_debug: bool) -> str:
     # include_debug changes response shape, therefore it is part of the key.
-    raw = f"v3|{checksum}|{top_tags}|{enhance}|{mode}|{ocr_policy}|{include_debug}|{settings.provider}|{settings.enable_yolo}|{settings.enable_clip}|{settings.ocr_engine}|{settings.ocr_languages}"
+    raw = f"v4|{checksum}|{top_tags}|{enhance}|{mode}|{ocr_policy}|{include_debug}|{settings.provider}|{settings.enable_yolo}|{settings.enable_clip}|{settings.ocr_engine}|{settings.ocr_languages}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -52,7 +57,7 @@ app = FastAPI(title="smart-gallery-analysis", version="3.0.0", lifespan=lifespan
 @app.middleware("http")
 async def api_request_logging_middleware(request: Request, call_next):
     path = request.url.path
-    if path == "/health":
+    if path in {"/health", "/health/live"}:
         return await call_next(request)
 
     started_at = now_ms()
@@ -68,9 +73,8 @@ async def api_request_logging_middleware(request: Request, call_next):
         raise
 
 
-@app.get("/health")
-def health() -> dict[str, Any]:
-    # This endpoint intentionally does not touch ML models and must stay responsive even when analysis workers are busy.
+@app.get("/health/live")
+def health_live() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": "3.0.0",
@@ -81,30 +85,61 @@ def health() -> dict[str, Any]:
         "intraopThreads": settings.intraop_threads,
         "ramProfile": settings.ram_profile,
         "memoryLimitGb": settings.memory_limit_gb,
-        "resultCache": result_cache.stats().__dict__,
-        "yoloEnabled": settings.enable_yolo,
-        "yoloModel": settings.yolo_model if settings.enable_yolo else None,
-        "ocrEngine": settings.ocr_engine,
-        "ocrLanguages": settings.ocr_languages,
-        "clipEnabled": settings.enable_clip,
-        "clipModel": settings.clip_model if settings.enable_clip else None,
-        "vlmEnabled": settings.enable_vlm,
-        "debugSaveEnabled": settings.save_debug,
-        "debugDir": str(settings.debug_dir),
+        "queueConfiguredFast": settings.max_pending_fast_requests,
+        "queueConfiguredEnrichment": settings.max_pending_enrichment_requests,
     }
 
 
+@app.get("/health")
+def health() -> dict[str, Any]:
+    return health_live()
+
+
+@app.get("/health/ready")
+def health_ready(response: Response) -> dict[str, Any]:
+    ready, details = analysis_executor.ready()
+    if not ready:
+        response.status_code = 503
+    return {"status": "ready" if ready else "not_ready", **details}
+
+
 @app.get("/ready")
-def ready() -> dict[str, Any]:
-    return {"status": "ready", "executorStarted": analysis_executor.started}
+def ready(response: Response) -> dict[str, Any]:
+    return health_ready(response)
 
 
-@app.post("/warmup")
+@app.get("/health/models")
+def health_models() -> dict[str, Any]:
+    statuses = [status.to_dict() for status in model_registry.collect_statuses(verify_checksum=True)]
+    return {"models": statuses, "manifestPath": str(settings.model_manifest_path)}
+
+
+@app.get("/metrics")
+def metrics_endpoint() -> Response:
+    queue = analysis_executor.queue_snapshot()["fast"]
+    cache_stats = result_cache.stats()
+    body = metrics.render_prometheus(
+        queue_depth=queue["current"],
+        queue_capacity=queue["capacity"],
+        queue_rejected_total=queue["rejected"],
+        cache_hits=cache_stats.hits,
+        model_statuses=[status.to_dict() for status in model_registry.collect_statuses(verify_checksum=False)],
+        memory_estimate_bytes=settings.memory_limit_gb * 1024 * 1024 * 1024,
+    )
+    return Response(content=body, media_type="text/plain; version=0.0.4")
+
+
+@app.post("/admin/warmup")
 async def warmup() -> dict[str, Any]:
     started = now_ms()
     result = await analysis_executor.warmup()
     result["durationMs"] = elapsed_ms(started)
     return result
+
+
+@app.post("/warmup")
+async def warmup_compat() -> dict[str, Any]:
+    return await warmup()
 
 
 async def analyze_bytes(
@@ -140,8 +175,14 @@ async def analyze_bytes(
 
     try:
         response_payload = await analysis_executor.analyze(payload)
+    except QueueFullError as exception:
+        raise HTTPException(status_code=429, detail=exception.to_payload(), headers={"Retry-After": str(exception.retry_after_seconds)}) from exception
+    except AnalysisTimeoutError as exception:
+        raise HTTPException(status_code=504, detail=exception.to_payload()) from exception
+    except (WorkerPoolUnavailableError, AnalysisServiceError) as exception:
+        raise HTTPException(status_code=503, detail=exception.to_payload()) from exception
     except RuntimeError as exception:
-        raise HTTPException(status_code=503, detail=f"Analysis executor unavailable: {exception}") from exception
+        raise HTTPException(status_code=503, detail={"code": "ANALYSIS_EXECUTOR_UNAVAILABLE", "message": f"Analysis executor unavailable: {exception}", "retryable": True, "component": "execution", "details": {}}) from exception
 
     result_cache.put(key, response_payload)
     return response_from_dict(response_payload)
@@ -171,7 +212,7 @@ async def analyze_batch(
     mode: str | None = Form(None),
     ocrPolicy: str | None = Form(None),
 ) -> list[AnalyzeResponse]:
-    max_files = max(1, min(500, settings.max_pending_requests * 4))
+    max_files = max(1, min(500, settings.max_pending_fast_requests * 4))
     if len(files) > max_files:
         raise HTTPException(status_code=413, detail=f"Too many files in one batch. Max: {max_files}")
 

@@ -9,6 +9,7 @@ services:
       ANALYSIS_PROVIDER: yolo_paddle_clip
       ANALYSIS_SAVE_DEBUG: "true"
       ANALYSIS_DEBUG_DIR: /analysis-debug
+      ANALYSIS_ALLOW_MODEL_DOWNLOAD: "false"
       ENABLE_CLIP: "true"
       CLIP_MODEL: ViT-B-32
       CLIP_PRETRAINED: openai
