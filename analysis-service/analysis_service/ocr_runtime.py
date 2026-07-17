@@ -369,9 +369,8 @@ def normalize_block(block: OcrBlock, image_kind: str) -> OcrBlock:
         normalized_tokens.append(corrected)
         if trace:
             correction_trace.append(trace)
-    display = re.sub(r"\s+", " ", " ".join(normalized_tokens)).strip()
-    preserve_case = image_kind in {"code_screenshot", "chat_screenshot"}
-    search = normalize_spaces(display, lowercase=not preserve_case) or ""
+    display = normalize_spaces(" ".join(normalized_tokens), lowercase=True) or ""
+    search = display
     language = "ru" if re.search(rf"[{CYR}]", display) else "en" if re.search(rf"[{LAT}]", display) else None
     return OcrBlock(rawText=raw, displayText=display, searchText=search, text=display, confidence=block.confidence, bbox=block.bbox, language=language, quality=block.quality, engine=block.engine, variant=block.variant, correctionTrace=correction_trace)
 
@@ -447,7 +446,7 @@ def detect_text(image: Image.Image, checksum_fixture_text: str | None, debug: An
         debug.ocrCandidates.append(OcrCandidateDebug(name="mock", width=image.width, height=image.height, lineCount=1, charCount=9, averageConfidence=1.0, score=1.0, accepted=True, preview="mock text"))
         return result, [], 0
     if checksum_fixture_text:
-        text = normalize_spaces(checksum_fixture_text)
+        text = normalize_spaces(checksum_fixture_text, lowercase=True)
         result = OcrResult(rawText=text, displayText=text, searchText=text, averageConfidence=1.0, quality="strong")
         debug.ocrCandidates.append(OcrCandidateDebug(name="fixture", width=image.width, height=image.height, lineCount=1, charCount=len(text or ""), averageConfidence=1.0, validCharRatio=1.0, mixedScriptTokenRatio=0.0, repetitionRatio=0.0, languagePlausibility=1.0, geometryScore=1.0, lineConsistency=1.0, score=float(len(text or "")), accepted=True, preview=preview_text(text)))
         return result, [], 0

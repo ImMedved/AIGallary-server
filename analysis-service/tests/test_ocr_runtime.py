@@ -44,7 +44,18 @@ class OcrRuntimeTests(unittest.TestCase):
             ],
             "chat_screenshot",
         )
-        self.assertEqual(result.displayText, "FIRST MESSAGE\n\nSECOND MESSAGE")
+        self.assertEqual(result.displayText, "first message\n\nsecond message")
+
+    def test_text_result_normalizes_display_text_to_lowercase(self) -> None:
+        result = build_text_result(
+            [
+                OcrBlock(rawText="Mixed OCR Text", displayText="Mixed OCR Text", searchText="mixed ocr text"),
+            ],
+            "document",
+        )
+        self.assertEqual(result.displayText, "mixed ocr text")
+        self.assertEqual(result.searchText, "mixed ocr text")
+        self.assertEqual(result.blocks[0].text, "mixed ocr text")
 
     def test_auto_policy_runs_on_natural_photo_with_text_cues(self) -> None:
         image = Image.new("RGB", (1200, 800), "white")
