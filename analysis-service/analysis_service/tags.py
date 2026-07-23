@@ -24,6 +24,10 @@ class TagCandidate:
     source: str
     reason: str
     priority: float = 0.0
+    category: str | None = None
+    model_name: str | None = None
+    model_version: str | None = None
+    validated: bool | None = None
 
     def rank_score(self) -> float:
         confidence = self.confidence if self.confidence is not None else 0.0
@@ -62,6 +66,271 @@ def normalize_tag_value(value: str) -> str:
     return aliases.get(normalized, normalized)
 
 
+TAXONOMY_VERSION = "tag-merger-v1"
+
+SUBTYPE_TAGS = {
+    "natural_photo",
+    "photo_with_text",
+    "screenshot",
+    "meme",
+    "poster",
+    "document",
+    "form",
+    "receipt",
+    "invoice",
+    "web_screenshot",
+    "ai_assistant_screenshot",
+    "code_screenshot",
+    "chat_screenshot",
+    "game_screenshot",
+    "unknown",
+}
+
+MEDIA_TAGS = {"image", "photo", "picture", "digital media"}
+TEXT_TAGS = {"text", "printed text", "handwritten text", "cyrillic text", "latin text", "paper", "whiteboard", "document"}
+PEOPLE_TAGS = {"people", "portrait", "selfie", "face", "group photo"}
+OBJECT_TAGS = (
+    ANIMAL_LABELS
+    | TRANSPORT_LABELS
+    | FURNITURE_LABELS
+    | ELECTRONICS_LABELS
+    | DOCUMENT_LABELS
+    | {
+        "vehicle",
+        "bus stop",
+        "street",
+        "city",
+        "building",
+        "food",
+        "drink",
+        "coffee",
+        "restaurant",
+        "computer",
+        "monitor",
+        "screen",
+        "keyboard",
+        "phone",
+        "table",
+        "sofa",
+        "bedroom",
+        "kitchen",
+        "books",
+        "bookshelf",
+        "library",
+        "sign",
+        "map",
+        "diagram",
+    }
+)
+STYLE_TAGS = {"anime", "illustration", "drawing", "art", "meme", "night", "party", "sports", "flower"}
+
+
+def infer_tag_category(value: str, source: str) -> str:
+    tag = normalize_tag_value(value)
+    if tag in SUBTYPE_TAGS:
+        return "image_subtype"
+    if tag in MEDIA_TAGS:
+        return "media"
+    if tag in TEXT_TAGS:
+        return "text"
+    if tag in PEOPLE_TAGS:
+        return "people"
+    if tag in OBJECT_TAGS:
+        return "object"
+    if tag in STYLE_TAGS:
+        return "style"
+    if source.upper() == "OCR":
+        return "text"
+    return "semantic"
+
+
+def model_name_for_source(source: str) -> str:
+    return {
+        "FIXTURE": "checksum-fixture",
+        "VLM": "ollama-vlm",
+        "YOLO": "ultralytics-yolo",
+        "OCR": "ocr-runtime",
+        "SYSTEM": "image-subtype-heuristics",
+        "CONTEXT": "tag-context-rules",
+        "CLIP": "openclip",
+        "FALLBACK": "fallback-rules",
+        "MOCK": "mock-provider",
+    }.get(source.upper(), source.lower() or "unknown")
+
+
+def confidence_quality(confidence: float | None, source_count: int, validated: bool) -> str:
+    value = confidence if confidence is not None else 0.0
+    if validated and (source_count >= 2 or value >= 0.82):
+        return "high"
+    if validated or value >= 0.66:
+        return "medium"
+    return "low"
+
+
+def has_receipt_or_invoice_text(recognized_text: str | None) -> bool:
+    lowered = (recognized_text or "").lower()
+    receipt_tokens = ("receipt", "invoice", "total", "subtotal", "vat", "tax", "eur", "usd", "руб", "₽", "$", "€")
+    return any(token in lowered for token in receipt_tokens) and bool(re.search(r"\d+[.,]\d{2}|\b\d{2,}\b", lowered))
+
+
+def subtype_support(subtypes: dict[str, float], *names: str) -> float:
+    return max((subtypes or {}).get(name, 0.0) for name in names) if names else 0.0
+
+
+def evidence_supported(
+    value: str,
+    source: str,
+    source_count: int,
+    raw_counts: dict[str, int],
+    recognized_text: str | None,
+    image_kind: str,
+    subtype_distribution: dict[str, float],
+) -> tuple[bool, str | None]:
+    tag = normalize_tag_value(value)
+    source_upper = source.upper()
+    document_support = subtype_support(subtype_distribution, "document", "form", "receipt", "invoice")
+    screenshot_support = subtype_support(
+        subtype_distribution,
+        "chat_screenshot",
+        "web_screenshot",
+        "code_screenshot",
+        "ai_assistant_screenshot",
+        "game_screenshot",
+    )
+    natural_support = subtype_support(subtype_distribution, "natural_photo", "photo_with_text")
+
+    if source_upper in {"FIXTURE", "SYSTEM", "YOLO", "OCR"}:
+        return True, None
+    if source_count >= 2:
+        return True, None
+
+    if tag in {"receipt", "invoice"} and source_upper in {"CLIP", "VLM", "CONTEXT"}:
+        if document_support >= 0.18 or has_receipt_or_invoice_text(recognized_text):
+            return True, None
+        return False, "receipt/invoice semantic tag rejected without document subtype or payment text evidence"
+
+    if tag == "group photo":
+        if raw_counts.get("person", 0) >= 2:
+            return True, None
+        return False, "group photo rejected without multiple detected people"
+
+    if tag in {"chat screenshot", "code screenshot", "game screenshot", "screenshot"} and source_upper in {"CLIP", "VLM"}:
+        if screenshot_support >= 0.18 or image_kind in {"screenshot", "chat_screenshot", "code_screenshot"}:
+            return True, None
+        return False, "screenshot semantic tag rejected without screenshot subtype evidence"
+
+    if tag in {"document", "paper", "printed text", "handwritten text", "whiteboard"} and source_upper in {"CLIP", "VLM"}:
+        if document_support >= 0.14 or recognized_text:
+            return True, None
+        if natural_support >= 0.45:
+            return False, "document/text semantic tag rejected on natural-photo subtype without OCR evidence"
+
+    if tag in {"transport", "vehicle", "bus stop"} and source_upper == "CLIP":
+        if raw_counts.keys() & TRANSPORT_LABELS:
+            return True, None
+        return False, "transport semantic tag rejected without detector support"
+
+    return True, None
+
+
+def candidate_is_validated(
+    value: str,
+    source: str,
+    source_count: int,
+    raw_counts: dict[str, int],
+    recognized_text: str | None,
+    image_kind: str,
+    subtype_distribution: dict[str, float],
+) -> bool:
+    tag = normalize_tag_value(value)
+    source_upper = source.upper()
+    if source_count >= 2 or source_upper in {"FIXTURE", "SYSTEM", "YOLO", "OCR", "CONTEXT"}:
+        return True
+    if tag in {"receipt", "invoice"}:
+        return subtype_support(subtype_distribution, "document", "form", "receipt", "invoice") >= 0.18 or has_receipt_or_invoice_text(recognized_text)
+    if tag == "group photo":
+        return raw_counts.get("person", 0) >= 2
+    if tag in {"chat screenshot", "code screenshot", "game screenshot", "screenshot"}:
+        return subtype_support(
+            subtype_distribution,
+            "chat_screenshot",
+            "web_screenshot",
+            "code_screenshot",
+            "ai_assistant_screenshot",
+            "game_screenshot",
+        ) >= 0.18 or image_kind in {"screenshot", "chat_screenshot", "code_screenshot"}
+    if tag in {"document", "paper", "printed text", "handwritten text", "whiteboard"}:
+        return subtype_support(subtype_distribution, "document", "form", "receipt", "invoice") >= 0.14 or bool(recognized_text)
+    if tag in {"transport", "vehicle", "bus stop"}:
+        return bool(raw_counts.keys() & TRANSPORT_LABELS)
+    return False
+
+
+def merge_evidence_candidates(
+    candidates: list[TagCandidate],
+    raw_counts: dict[str, int],
+    recognized_text: str | None,
+    image_kind: str,
+    subtype_distribution: dict[str, float] | None,
+) -> tuple[list[TagCandidate], list[str]]:
+    subtypes = subtype_distribution or {}
+    grouped: dict[str, list[TagCandidate]] = {}
+    for candidate in candidates:
+        normalized = normalize_tag_value(candidate.value)
+        if normalized:
+            grouped.setdefault(normalized, []).append(candidate)
+
+    merged: list[TagCandidate] = []
+    warnings: list[str] = []
+    for value, group in grouped.items():
+        best = max(group, key=lambda item: item.rank_score())
+        source_count = len({item.source.upper() for item in group})
+        supported, rejection_reason = evidence_supported(
+            value,
+            best.source,
+            source_count,
+            raw_counts,
+            recognized_text,
+            image_kind,
+            subtypes,
+        )
+        if not supported:
+            warnings.append(f"tag '{value}' rejected: {rejection_reason}")
+            continue
+
+        confidence_values = [item.confidence for item in group if item.confidence is not None]
+        confidence = best.confidence
+        if source_count >= 2 and confidence_values:
+            confidence = round(min(0.98, max(confidence_values) + min(0.08, 0.025 * (source_count - 1))), 4)
+        validated = best.validated if best.validated is not None else candidate_is_validated(
+            value,
+            best.source,
+            source_count,
+            raw_counts,
+            recognized_text,
+            image_kind,
+            subtypes,
+        )
+        category = best.category or infer_tag_category(value, best.source)
+        reason = best.reason
+        if source_count >= 2:
+            reason = f"{reason}; corroborated by {source_count} sources"
+        merged.append(
+            TagCandidate(
+                value=value,
+                confidence=confidence,
+                source=best.source,
+                reason=reason,
+                priority=best.priority + min(0.08, 0.025 * (source_count - 1)),
+                category=category,
+                model_name=best.model_name or model_name_for_source(best.source),
+                model_version=best.model_version or TAXONOMY_VERSION,
+                validated=validated,
+            )
+        )
+    return merged, warnings
+
+
 def fixture_tags(checksum: str) -> tuple[list[TagCandidate], str | None]:
     fixture = FIXTURE_ANALYSIS.get(checksum)
     if not fixture:
@@ -73,8 +342,13 @@ def fixture_tags(checksum: str) -> tuple[list[TagCandidate], str | None]:
     return tags, fixture.get("recognizedText")
 
 
-def system_tag_candidates(image_kind: str, recognized_text: str | None) -> list[TagCandidate]:
-    tags = [TagCandidate(value=image_kind, confidence=0.72, source="SYSTEM", reason="image kind classifier", priority=0.02)]
+def system_tag_candidates(image_kind: str, recognized_text: str | None, subtype_distribution: dict[str, float] | None = None) -> list[TagCandidate]:
+    subtype_distribution = subtype_distribution or {}
+    image_kind_confidence = max(subtype_distribution.values(), default=0.72)
+    tags = [TagCandidate(value=image_kind, confidence=round(image_kind_confidence, 4), source="SYSTEM", reason="image subtype classifier", priority=0.02)]
+    for subtype, confidence in sorted(subtype_distribution.items(), key=lambda item: item[1], reverse=True)[:3]:
+        if subtype != image_kind and confidence >= 0.18:
+            tags.append(TagCandidate(value=subtype, confidence=confidence, source="SYSTEM", reason="image subtype distribution"))
     if image_kind == "natural_photo":
         tags.append(TagCandidate(value="photo", confidence=0.70, source="SYSTEM", reason="image kind classifier"))
     if image_kind == "receipt":
@@ -156,11 +430,25 @@ def deduplicate_tag_candidates(candidates: list[TagCandidate], top_tags: int) ->
                 source=candidate.source,
                 reason=candidate.reason,
                 priority=candidate.priority,
+                category=candidate.category or infer_tag_category(normalized, candidate.source),
+                model_name=candidate.model_name or model_name_for_source(candidate.source),
+                model_version=candidate.model_version or TAXONOMY_VERSION,
+                validated=candidate.validated,
             )
 
     ordered = sorted(best_by_value.values(), key=lambda item: item.rank_score(), reverse=True)
     return [
-        DetectedTag(value=item.value, confidence=item.confidence, source=item.source, reason=item.reason)
+        DetectedTag(
+            value=item.value,
+            confidence=item.confidence,
+            source=item.source,
+            reason=item.reason,
+            category=item.category or infer_tag_category(item.value, item.source),
+            quality=confidence_quality(item.confidence, 1, bool(item.validated)),
+            modelName=item.model_name or model_name_for_source(item.source),
+            modelVersion=item.model_version or TAXONOMY_VERSION,
+            validated=bool(item.validated),
+        )
         for item in ordered[:top_tags]
     ]
 

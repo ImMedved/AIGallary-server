@@ -66,11 +66,33 @@ def should_run_ocr(image_kind: str, policy: OcrPolicy, image: Image.Image) -> bo
         return False
     if policy == "always":
         return True
-    if image_kind in {"screenshot", "document", "meme", "receipt", "code_screenshot", "chat_screenshot"}:
+    if image_kind in {"screenshot", "document", "meme", "receipt", "code_screenshot", "chat_screenshot", "photo_with_text"}:
         return True
     if image_kind == "natural_photo":
-        return estimate_text_likelihood(image) >= 0.28
+        return estimate_text_likelihood(image) >= 0.34
     return False
+
+
+def derive_ocr_image_kind(image: Image.Image, debug: AnalysisDebugPayload) -> str:
+    subtypes = debug.imageSubtypes or {}
+    text_likelihood = estimate_text_likelihood(image)
+    screenshot_score = max(
+        subtypes.get("web_screenshot", 0.0),
+        subtypes.get("chat_screenshot", 0.0),
+        subtypes.get("code_screenshot", 0.0),
+        subtypes.get("ai_assistant_screenshot", 0.0),
+        subtypes.get("game_screenshot", 0.0),
+    )
+    document_score = max(subtypes.get("document", 0.0), subtypes.get("form", 0.0), subtypes.get("receipt", 0.0), subtypes.get("invoice", 0.0))
+    if debug.imageKind in {"screenshot", "document", "meme", "receipt", "code_screenshot", "chat_screenshot"}:
+        return debug.imageKind
+    if screenshot_score >= 0.15 and text_likelihood >= 0.48:
+        return "screenshot"
+    if document_score >= 0.14 and text_likelihood >= 0.55:
+        return "document"
+    if subtypes.get("photo_with_text", 0.0) >= 0.22 and text_likelihood >= 0.24:
+        return "photo_with_text"
+    return debug.imageKind
 
 
 def _ensure_model_available(settings: Settings, name: str) -> None:
@@ -139,7 +161,17 @@ def build_ocr_candidates(image: Image.Image, image_kind: str, settings: Settings
     if image_kind in {"code_screenshot", "chat_screenshot"}:
         return [("base", base), ("gray_autocontrast", autocontrasted.convert("RGB")), ("contrast_sharpen", sharpened.convert("RGB"))]
     if image_kind in {"screenshot", "document", "meme", "receipt"}:
-        return [("base", base), ("gray_autocontrast", autocontrasted.convert("RGB")), ("threshold", threshold.convert("RGB"))]
+        return [("base", base), ("gray_autocontrast", autocontrasted.convert("RGB"))]
+    if image_kind == "photo_with_text":
+        width, height = base.size
+        upper_crop = base.crop((0, 0, width, max(1, int(height * 0.55))))
+        center_crop = base.crop((0, max(0, int(height * 0.18)), width, min(height, int(height * 0.82))))
+        return [
+            ("base", base),
+            ("upper_crop", upper_crop),
+            ("center_crop", center_crop),
+            ("gray_autocontrast", autocontrasted.convert("RGB")),
+        ]
     if image_kind == "natural_photo":
         return [("base", base)]
     return [("base", base), ("contrast_sharpen", sharpened.convert("RGB")), ("gray_autocontrast", autocontrasted.convert("RGB"))]
@@ -296,6 +328,16 @@ def quality_from_score(score: float) -> str:
     return "rejected"
 
 
+def should_stop_after_ocr_candidate(ocr_image_kind: str, candidate_name: str, score: float, display_text: str | None) -> bool:
+    if not display_text:
+        return False
+    if ocr_image_kind in {"screenshot", "document", "receipt", "code_screenshot", "chat_screenshot"}:
+        return score >= 150.0
+    if ocr_image_kind == "photo_with_text":
+        return candidate_name == "base" and score >= 170.0
+    return candidate_name == "base" and score >= 135.0
+
+
 def score_ocr_blocks(blocks: list[OcrBlock]) -> tuple[float, str | None, float, float, float | None, float, float, float]:
     if not blocks:
         return 0.0, "no text blocks", 0.0, 0.0, None, 0.0, 0.0, 0.0
@@ -450,23 +492,26 @@ def detect_text(image: Image.Image, checksum_fixture_text: str | None, debug: An
         result = OcrResult(rawText=text, displayText=text, searchText=text, averageConfidence=1.0, quality="strong")
         debug.ocrCandidates.append(OcrCandidateDebug(name="fixture", width=image.width, height=image.height, lineCount=1, charCount=len(text or ""), averageConfidence=1.0, validCharRatio=1.0, mixedScriptTokenRatio=0.0, repetitionRatio=0.0, languagePlausibility=1.0, geometryScore=1.0, lineConsistency=1.0, score=float(len(text or "")), accepted=True, preview=preview_text(text)))
         return result, [], 0
-    if not should_run_ocr(debug.imageKind, policy, image):
+    ocr_image_kind = derive_ocr_image_kind(image, debug)
+    if ocr_image_kind != debug.imageKind:
+        debug.warnings.append(f"ocr route overridden: {debug.imageKind} -> {ocr_image_kind}")
+    if not should_run_ocr(ocr_image_kind, policy, image):
         return None, [], 0
     started = now_ms()
     best: OcrCandidateResult | None = None
     rejected_blocks = 0
     try:
         for engine in selected_ocr_engines(settings, mode):
-            for candidate_name, candidate in build_ocr_candidates(image, debug.imageKind, settings):
+            for candidate_name, candidate in build_ocr_candidates(image, ocr_image_kind, settings):
                 full_name = f"{engine}:{candidate_name}"
                 candidate_start = now_ms()
                 try:
                     blocks = run_ocr_engine(engine, candidate, settings, candidate_name)
-                    if debug.imageKind == "natural_photo":
+                    if ocr_image_kind == "natural_photo":
                         blocks = rerun_photo_regions(candidate, blocks, engine, settings)
                     filtered, rejected = filter_blocks(blocks, settings)
                     rejected_blocks += rejected
-                    result = build_text_result(filtered, debug.imageKind)
+                    result = build_text_result(filtered, ocr_image_kind)
                     score, rejection, valid_ratio, mixed_ratio, avg_conf, repetition, plausibility, geometry = score_ocr_blocks(result.blocks)
                     accepted = rejection is None and bool(result.displayText)
                     candidate_debug = OcrCandidateDebug(name=full_name, width=candidate.width, height=candidate.height, lineCount=len(result.blocks), charCount=len(result.displayText or ""), averageConfidence=round(avg_conf, 4) if avg_conf is not None else None, validCharRatio=round(valid_ratio, 4), mixedScriptTokenRatio=round(mixed_ratio, 4), repetitionRatio=round(repetition, 4), languagePlausibility=round(plausibility, 4), geometryScore=round(geometry, 4), lineConsistency=round(line_consistency(result.blocks), 4), score=score, accepted=accepted, preview=preview_text(result.displayText), rejectionReason=rejection)
@@ -476,10 +521,15 @@ def detect_text(image: Image.Image, checksum_fixture_text: str | None, debug: An
                         current = OcrCandidateResult(name=full_name, result=result, debug=candidate_debug)
                         if best is None or current.debug.score > best.debug.score:
                             best = current
+                        if should_stop_after_ocr_candidate(ocr_image_kind, candidate_name, score, result.displayText):
+                            logger.debug("OCR early stop candidate=%s score=%s kind=%s", full_name, score, ocr_image_kind)
+                            break
                 except Exception as exception:
                     debug.ocrCandidates.append(OcrCandidateDebug(name=full_name, width=candidate.width, height=candidate.height, lineCount=0, charCount=0, score=0.0, accepted=False, error=str(exception), rejectionReason="exception"))
                     debug.errors.append(f"ocr:{full_name}: {exception}")
                     logger.exception("OCR candidate=%s failed", full_name)
+            if best is not None and should_stop_after_ocr_candidate(ocr_image_kind, best.name.split(":", 1)[-1], best.debug.score, best.result.displayText):
+                break
         debug.timingsMs["ocr"] = elapsed_ms(started)
         if best is None:
             return None, [], rejected_blocks

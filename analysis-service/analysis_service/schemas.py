@@ -8,6 +8,11 @@ class DetectedTag(BaseModel):
     confidence: float | None = None
     source: str | None = None
     reason: str | None = None
+    category: str | None = None
+    quality: str | None = None
+    modelName: str | None = None
+    modelVersion: str | None = None
+    validated: bool | None = None
 
 
 class OcrBlock(BaseModel):
@@ -72,6 +77,13 @@ class ClipCandidateDebug(BaseModel):
     confidence: float
     prompt: str
     rawScore: float | None = None
+    rawSimilarity: float | None = None
+    positiveSimilarity: float | None = None
+    negativeSimilarity: float | None = None
+    margin: float | None = None
+    calibratedConfidence: float | None = None
+    accepted: bool = False
+    rejectionReason: str | None = None
 
 
 class AnalysisDebugPayload(BaseModel):
@@ -82,7 +94,12 @@ class AnalysisDebugPayload(BaseModel):
     provider: str
     mode: str
     imageKind: str
-    pipelineStatus: str = "SEARCHABLE"
+    imageKindConfidence: float | None = None
+    imageSubtypes: dict[str, float] = Field(default_factory=dict)
+    imageRoute: str | None = None
+    pipelineStatus: str = "COMPLETED"
+    componentStatus: dict[str, str] = Field(default_factory=dict)
+    componentErrors: list[dict[str, object]] = Field(default_factory=list)
     enrichmentScheduled: bool = False
     timingsMs: dict[str, int] = Field(default_factory=dict)
     ocrCandidates: list[OcrCandidateDebug] = Field(default_factory=list)
@@ -98,6 +115,7 @@ class AnalysisDebugPayload(BaseModel):
 class AnalyzeResponse(BaseModel):
     tags: list[DetectedTag]
     recognizedText: str | None = None
+    pipelineStatus: str = "COMPLETED"
     caption: str | None = None
     ocr: OcrResult | None = None
     ocrBlocks: list[OcrBlock] | None = None

@@ -8,10 +8,12 @@ from analysis_service.ocr_runtime import (
     OcrBlock,
     build_text_result,
     correct_mixed_script_token,
+    derive_ocr_image_kind,
     score_ocr_blocks,
     selected_ocr_engines,
     should_run_ocr,
 )
+from analysis_service.schemas import AnalysisDebugPayload
 from analysis_service.settings import load_settings
 
 
@@ -63,6 +65,24 @@ class OcrRuntimeTests(unittest.TestCase):
             for y in range(100, 300, 6):
                 image.putpixel((x, y), (0, 0, 0))
         self.assertTrue(should_run_ocr("natural_photo", "auto", image))
+
+    def test_derive_ocr_route_promotes_text_screenshot(self) -> None:
+        image = Image.new("RGB", (1280, 720), "white")
+        for y in range(80, 620, 40):
+            for x in range(80, 1120):
+                image.putpixel((x, y), (0, 0, 0))
+        debug = AnalysisDebugPayload(
+            checksum="abc",
+            filename="screen.png",
+            imageWidth=1280,
+            imageHeight=720,
+            provider="local_ml",
+            mode="quality",
+            imageKind="natural_photo",
+            imageSubtypes={"web_screenshot": 0.18, "photo_with_text": 0.20},
+        )
+
+        self.assertEqual(derive_ocr_image_kind(image, debug), "screenshot")
 
 
 if __name__ == "__main__":

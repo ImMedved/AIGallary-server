@@ -73,7 +73,7 @@ class ModelRegistry:
                     name="clip",
                     version=f"{self.settings.clip_model}:{self.settings.clip_pretrained}",
                     requiredFor=("optional",),
-                    artifactRoots=(self.settings.hf_home, self.settings.hf_hub_cache, self.settings.torch_home, self.settings.xdg_cache_home),
+                    artifactRoots=(self.settings.xdg_cache_home / "open_clip",),
                 )
             )
         if self.settings.ocr_engine in {"auto", "easyocr", "both"}:

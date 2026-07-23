@@ -105,6 +105,7 @@ class Settings:
     max_pending_fast_requests: int
     max_pending_enrichment_requests: int
     result_cache_mb: int
+    result_cache_dir: Path
     save_debug: bool
     include_debug_by_default: bool
     debug_dir: Path
@@ -202,12 +203,13 @@ def load_settings() -> Settings:
         max_pending_fast_requests=int_env("ANALYSIS_MAX_PENDING_FAST_REQUESTS", legacy_pending, minimum=1, maximum=512),
         max_pending_enrichment_requests=int_env("ANALYSIS_MAX_PENDING_ENRICHMENT_REQUESTS", default_pending_enrichment, minimum=1, maximum=512),
         result_cache_mb=int_env("ANALYSIS_RESULT_CACHE_MB", default_cache_mb(profile, memory_gb), minimum=0, maximum=memory_gb * 1024),
+        result_cache_dir=path_env("ANALYSIS_RESULT_CACHE_DIR", str(model_cache_dir / "result-cache")),
         save_debug=bool_env("ANALYSIS_SAVE_DEBUG", True),
         include_debug_by_default=bool_env("ANALYSIS_INCLUDE_DEBUG_IN_RESPONSE", False),
         debug_dir=path_env("ANALYSIS_DEBUG_DIR", "/tmp/smart-gallery-analysis-debug"),
         preload_on_startup=bool_env("ANALYSIS_PRELOAD_ON_STARTUP", True),
         warmup_timeout_seconds=float_env("ANALYSIS_WARMUP_TIMEOUT_SECONDS", 180.0, minimum=1.0, maximum=3600.0),
-        fast_timeout_seconds=float_env("ANALYSIS_FAST_TIMEOUT_SECONDS", 30.0 if profile == "test" else 45.0, minimum=1.0, maximum=600.0),
+        fast_timeout_seconds=float_env("ANALYSIS_FAST_TIMEOUT_SECONDS", 90.0 if profile == "test" else 75.0, minimum=1.0, maximum=600.0),
         queue_retry_after_seconds=int_env("ANALYSIS_QUEUE_RETRY_AFTER_SECONDS", 15, minimum=1, maximum=3600),
         allow_model_download=bool_env("ANALYSIS_ALLOW_MODEL_DOWNLOAD", False),
         model_cache_dir=model_cache_dir,

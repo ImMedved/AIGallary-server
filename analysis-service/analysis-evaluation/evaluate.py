@@ -16,10 +16,10 @@ from urllib import error, request
 
 
 ROOT = Path(__file__).resolve().parent
-IMAGES_DIR = ROOT / "images"
-EXPECTED_DIR = ROOT / "expected"
-RESULTS_DIR = ROOT / "results"
-REPORTS_DIR = ROOT / "reports"
+DEFAULT_IMAGES_DIR = ROOT / "images"
+DEFAULT_EXPECTED_DIR = ROOT / "expected"
+DEFAULT_RESULTS_DIR = ROOT / "results"
+DEFAULT_REPORTS_DIR = ROOT / "reports"
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,14 +30,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ocr-policy", default=None, help="Optional OCR policy override.")
     parser.add_argument("--report-name", default=None, help="Optional explicit report basename.")
     parser.add_argument("--comparison-json", default=None, help="Optional previous aggregate report for comparison.")
+    parser.add_argument("--images-dir", default=str(DEFAULT_IMAGES_DIR), help="Directory with images to evaluate.")
+    parser.add_argument("--expected-dir", default=str(DEFAULT_EXPECTED_DIR), help="Directory with expected JSON files.")
+    parser.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR), help="Directory for per-image raw responses.")
+    parser.add_argument("--reports-dir", default=str(DEFAULT_REPORTS_DIR), help="Directory for aggregate reports.")
+    parser.add_argument("--allow-missing-expected", action="store_true", help="Evaluate images without expected JSON as unlabeled baseline cases.")
     parser.add_argument("--max-retries", type=int, default=20, help="Maximum retries for transient queue saturation.")
     parser.add_argument("--retry-after-default", type=float, default=15.0, help="Fallback retry delay in seconds.")
     return parser.parse_args()
 
 
-def read_expected(image_path: Path) -> dict[str, Any]:
-    expected_path = EXPECTED_DIR / f"{image_path.stem}.json"
-    return json.loads(expected_path.read_text(encoding="utf-8"))
+def read_expected(image_path: Path, expected_dir: Path, allow_missing: bool) -> dict[str, Any]:
+    expected_path = expected_dir / f"{image_path.stem}.json"
+    if expected_path.exists():
+        payload = json.loads(expected_path.read_text(encoding="utf-8"))
+        payload["hasExpected"] = True
+        return payload
+    if not allow_missing:
+        raise FileNotFoundError(f"Missing expected JSON for {image_path.name}: {expected_path}")
+    return {
+        "hasExpected": False,
+        "imageKind": "unlabeled",
+        "expectedText": "",
+        "requiredTags": [],
+        "allowedTags": [],
+        "forbiddenTags": [],
+        "notes": "No expected JSON; included for raw baseline tracking.",
+    }
+
+
+def get_json(base_url: str, path: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
+    target = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+    try:
+        with request.urlopen(target, timeout=timeout_seconds) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as exception:
+        return {"error": str(exception)}
 
 
 def encode_multipart(fields: dict[str, str], file_path: Path) -> tuple[bytes, str]:
@@ -198,33 +226,52 @@ def percentile(values: list[float], ratio: float) -> float:
 
 
 def compute_quality_metrics(item_results: list[dict[str, Any]]) -> dict[str, Any]:
-    ocr_items = [item for item in item_results if item["expectedText"]]
+    labeled_items = [item for item in item_results if item.get("hasExpected")]
+    ocr_items = [item for item in labeled_items if item["expectedText"]]
     cer_values = [item["cer"] for item in ocr_items]
     wer_values = [item["wer"] for item in ocr_items]
-    garbage_rate = sum(1 for item in item_results if item["acceptedGarbage"]) / max(1, len(item_results))
+    garbage_rate = sum(1 for item in labeled_items if item["acceptedGarbage"]) / max(1, len(labeled_items))
     empty_result_rate = sum(1 for item in ocr_items if item["predictedText"] == "") / max(1, len(ocr_items))
-    forbidden_tag_rate = sum(1 for item in item_results if item["forbiddenTagHit"]) / max(1, len(item_results))
+    expected_containment_rate = sum(1 for item in ocr_items if item.get("expectedTextContained")) / max(1, len(ocr_items))
+    false_text_items = [item for item in labeled_items if not item["expectedText"]]
+    false_text_rate = sum(1 for item in false_text_items if item["predictedText"] != "") / max(1, len(false_text_items))
+    forbidden_tag_rate = sum(1 for item in labeled_items if item["forbiddenTagHit"]) / max(1, len(labeled_items))
     empty_tag_rate = sum(1 for item in item_results if not item["predictedTags"]) / max(1, len(item_results))
     request_error_rate = sum(1 for item in item_results if item.get("errorCode")) / max(1, len(item_results))
-    avg_ocr_time = statistics.fmean(item["ocrTimeMs"] for item in item_results) if item_results else 0.0
-    p95_ocr_time = percentile([item["ocrTimeMs"] for item in item_results], 0.95)
-    avg_tag_time = statistics.fmean(item["totalTimeMs"] for item in item_results) if item_results else 0.0
-    p95_tag_time = percentile([item["totalTimeMs"] for item in item_results], 0.95)
+    ocr_times = [item["ocrTimeMs"] for item in item_results]
+    total_times = [item["totalTimeMs"] for item in item_results]
+    avg_ocr_time = statistics.fmean(ocr_times) if ocr_times else 0.0
+    median_ocr_time = statistics.median(ocr_times) if ocr_times else 0.0
+    p95_ocr_time = percentile(ocr_times, 0.95)
+    avg_total_time = statistics.fmean(total_times) if total_times else 0.0
+    median_total_time = statistics.median(total_times) if total_times else 0.0
+    p95_total_time = percentile(total_times, 0.95)
 
     return {
+        "labeledImageCount": len(labeled_items),
+        "unlabeledImageCount": len(item_results) - len(labeled_items),
         "cer": round(statistics.fmean(cer_values), 4) if cer_values else None,
         "wer": round(statistics.fmean(wer_values), 4) if wer_values else None,
         "acceptedGarbageRate": round(garbage_rate, 4),
         "emptyResultRate": round(empty_result_rate, 4),
+        "expectedTextContainmentRate": round(expected_containment_rate, 4),
+        "falseTextRate": round(false_text_rate, 4),
         "averageOcrTimeMs": round(avg_ocr_time, 2),
+        "medianOcrTimeMs": round(median_ocr_time, 2),
         "p95OcrTimeMs": round(p95_ocr_time, 2),
         "precisionAt5": round(statistics.fmean(item["precisionAt5"] for item in item_results), 4) if item_results else 0.0,
         "recallAt5": round(statistics.fmean(item["recallAt5"] for item in item_results), 4) if item_results else 0.0,
         "forbiddenTagRate": round(forbidden_tag_rate, 4),
         "emptyTagRate": round(empty_tag_rate, 4),
         "requestErrorRate": round(request_error_rate, 4),
-        "averageTagTimeMs": round(avg_tag_time, 2),
-        "p95TagTimeMs": round(p95_tag_time, 2),
+        "averageTotalTimeMs": round(avg_total_time, 2),
+        "medianTotalTimeMs": round(median_total_time, 2),
+        "p95TotalTimeMs": round(p95_total_time, 2),
+        "cacheHitRate": None,
+        "duplicateInferenceCount": None,
+        "failedOrPartialJobs": sum(1 for item in item_results if item.get("errorCode") or item.get("pipelineStatus") not in {None, "SEARCHABLE", "COMPLETED"}),
+        "peakRamMb": None,
+        "cpuUtilization": None,
     }
 
 
@@ -236,6 +283,9 @@ def markdown_summary(report: dict[str, Any], comparison: dict[str, Any] | None) 
         f"- Generated at: `{report['generatedAt']}`",
         f"- Base URL: `{report['baseUrl']}`",
         f"- Images evaluated: `{report['imageCount']}`",
+        f"- Labeled images: `{metrics['labeledImageCount']}`",
+        f"- Unlabeled images: `{metrics['unlabeledImageCount']}`",
+        f"- Pipeline version: `{report.get('pipelineVersion')}`",
         "",
         "## Overall Metrics",
         "",
@@ -243,15 +293,24 @@ def markdown_summary(report: dict[str, Any], comparison: dict[str, Any] | None) 
         f"- WER: `{metrics['wer']}`",
         f"- Accepted garbage rate: `{metrics['acceptedGarbageRate']}`",
         f"- Empty result rate: `{metrics['emptyResultRate']}`",
+        f"- Expected text containment rate: `{metrics.get('expectedTextContainmentRate')}`",
+        f"- False text rate: `{metrics['falseTextRate']}`",
         f"- Precision@5: `{metrics['precisionAt5']}`",
         f"- Recall@5: `{metrics['recallAt5']}`",
         f"- Forbidden tag rate: `{metrics['forbiddenTagRate']}`",
         f"- Empty tag rate: `{metrics['emptyTagRate']}`",
         f"- Request error rate: `{metrics['requestErrorRate']}`",
+        f"- Median OCR time ms: `{metrics['medianOcrTimeMs']}`",
         f"- Average OCR time ms: `{metrics['averageOcrTimeMs']}`",
         f"- P95 OCR time ms: `{metrics['p95OcrTimeMs']}`",
-        f"- Average tag time ms: `{metrics['averageTagTimeMs']}`",
-        f"- P95 tag time ms: `{metrics['p95TagTimeMs']}`",
+        f"- Median total time ms: `{metrics['medianTotalTimeMs']}`",
+        f"- Average total time ms: `{metrics['averageTotalTimeMs']}`",
+        f"- P95 total time ms: `{metrics['p95TotalTimeMs']}`",
+        f"- Cache hit rate: `{metrics['cacheHitRate']}`",
+        f"- Duplicate inference count: `{metrics['duplicateInferenceCount']}`",
+        f"- Failed/partial jobs: `{metrics['failedOrPartialJobs']}`",
+        f"- Peak RAM MB: `{metrics['peakRamMb']}`",
+        f"- CPU utilization: `{metrics['cpuUtilization']}`",
         "",
         "## By Category",
         "",
@@ -265,6 +324,7 @@ def markdown_summary(report: dict[str, Any], comparison: dict[str, Any] | None) 
         lines.append(f"- Precision@5: `{category_report['metrics']['precisionAt5']}`")
         lines.append(f"- Recall@5: `{category_report['metrics']['recallAt5']}`")
         lines.append(f"- Accepted garbage rate: `{category_report['metrics']['acceptedGarbageRate']}`")
+        lines.append(f"- Expected text containment rate: `{category_report['metrics'].get('expectedTextContainmentRate')}`")
         lines.append("")
 
     if comparison:
@@ -278,6 +338,7 @@ def markdown_summary(report: dict[str, Any], comparison: dict[str, Any] | None) 
                 f"- Precision@5 delta: `{delta(comparison.get('overall', {}).get('precisionAt5'), metrics['precisionAt5'])}`",
                 f"- Recall@5 delta: `{delta(comparison.get('overall', {}).get('recallAt5'), metrics['recallAt5'])}`",
                 f"- Garbage rate delta: `{delta(comparison.get('overall', {}).get('acceptedGarbageRate'), metrics['acceptedGarbageRate'])}`",
+                f"- P95 total time delta: `{delta(comparison.get('overall', {}).get('p95TotalTimeMs'), metrics['p95TotalTimeMs'])}`",
                 "",
             ]
         )
@@ -294,17 +355,26 @@ def delta(previous: float | None, current: float | None) -> str:
 
 def main() -> None:
     args = parse_args()
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    images_dir = Path(args.images_dir)
+    expected_dir = Path(args.expected_dir)
+    results_dir = Path(args.results_dir)
+    reports_dir = Path(args.reports_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
-    images = sorted(path for path in IMAGES_DIR.iterdir() if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".ppm"})
+    images = sorted(path for path in images_dir.iterdir() if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".ppm"})
     report_name = args.report_name or datetime.now(timezone.utc).strftime("baseline-%Y%m%dT%H%M%SZ")
+    run_results_dir = results_dir / report_name
+    run_results_dir.mkdir(parents=True, exist_ok=True)
+    health_live = get_json(args.base_url, "/health/live")
+    health_ready = get_json(args.base_url, "/health/ready")
+    health_models = get_json(args.base_url, "/health/models", timeout_seconds=120.0)
 
     item_results: list[dict[str, Any]] = []
     by_category: dict[str, list[dict[str, Any]]] = {}
 
     for image_path in images:
-        expected = read_expected(image_path)
+        expected = read_expected(image_path, expected_dir, args.allow_missing_expected)
         error_code = None
         error_message = None
         try:
@@ -340,6 +410,7 @@ def main() -> None:
         expected_text = normalize_text(expected.get("expectedText"))
         tags = [str(tag.get("value", "")).strip().lower() for tag in payload.get("tags", []) if str(tag.get("value", "")).strip()]
         top_tags = tags[:5]
+        has_expected = bool(expected.get("hasExpected"))
         positive_tags = {tag.lower() for tag in expected.get("requiredTags", []) + expected.get("allowedTags", [])}
         required_tags = {tag.lower() for tag in expected.get("requiredTags", [])}
         forbidden_tags = {tag.lower() for tag in expected.get("forbiddenTags", [])}
@@ -348,36 +419,65 @@ def main() -> None:
         recall_hits = sum(1 for tag in required_tags if tag in top_tags)
         cer_value = cer(expected_text, predicted_text) if expected_text else 0.0
         wer_value = wer(expected_text, predicted_text) if expected_text else 0.0
-        garbage = bool(predicted_text) and (not expected_text or cer_value > 0.6)
+        expected_contained = bool(expected_text) and expected_text in predicted_text
+        garbage = has_expected and bool(predicted_text) and (not expected_text or (cer_value > 0.6 and not expected_contained))
         ocr_time_ms = float(payload.get("debug", {}).get("timingsMs", {}).get("ocr", wall_time_ms))
         total_time_ms = float(payload.get("debug", {}).get("timingsMs", {}).get("total", wall_time_ms))
+        raw_result_path = run_results_dir / f"{image_path.stem}.result.json"
+        try:
+            display_result_path = str(raw_result_path.resolve().relative_to(ROOT.resolve()))
+        except ValueError:
+            display_result_path = str(raw_result_path)
 
         item = {
             "image": image_path.name,
-            "imageKind": expected["imageKind"],
+            "hasExpected": has_expected,
+            "imageKind": expected.get("imageKind") or expected.get("expectedKind") or "unlabeled",
             "expectedText": expected_text,
             "predictedText": predicted_text,
             "predictedTags": top_tags,
-            "precisionAt5": matches / max(1, min(5, len(top_tags))) if top_tags else 0.0,
-            "recallAt5": recall_hits / max(1, len(required_tags)) if required_tags else 1.0,
+            "finalTags": tags,
+            "precisionAt5": matches / max(1, min(5, len(top_tags))) if has_expected and top_tags else 0.0,
+            "recallAt5": recall_hits / max(1, len(required_tags)) if has_expected and required_tags else (1.0 if has_expected else 0.0),
             "forbiddenTagHit": any(tag in forbidden_tags for tag in top_tags),
             "acceptedGarbage": garbage,
+            "expectedTextContained": expected_contained,
             "cer": round(cer_value, 4),
             "wer": round(wer_value, 4),
             "ocrTimeMs": round(ocr_time_ms, 2),
             "totalTimeMs": round(total_time_ms, 2),
             "httpWallTimeMs": round(wall_time_ms, 2),
+            "pipelineStatus": payload.get("pipelineStatus") or payload.get("debug", {}).get("pipelineStatus"),
+            "ocrQuality": payload.get("ocr", {}).get("quality") if isinstance(payload.get("ocr"), dict) else None,
+            "ocrCandidateCount": len(payload.get("debug", {}).get("ocrCandidates", [])) if isinstance(payload.get("debug"), dict) else 0,
+            "yoloDetectionCount": len(payload.get("debug", {}).get("rawYoloLabels", [])) if isinstance(payload.get("debug"), dict) else 0,
+            "clipCandidateCount": len(payload.get("debug", {}).get("clipScores", [])) if isinstance(payload.get("debug"), dict) else 0,
+            "rawResultPath": display_result_path,
             "errorCode": error_code,
             "errorMessage": error_message,
         }
         item_results.append(item)
-        by_category.setdefault(expected["imageKind"], []).append(item)
-        (RESULTS_DIR / f"{image_path.stem}.result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        by_category.setdefault(item["imageKind"], []).append(item)
+        raw_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     report = {
         "reportName": report_name,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "baseUrl": args.base_url,
+        "imagesDir": str(images_dir),
+        "expectedDir": str(expected_dir),
+        "resultsDir": str(run_results_dir),
+        "pipelineVersion": health_live.get("version"),
+        "service": {
+            "healthLive": health_live,
+            "healthReady": health_ready,
+            "healthModels": health_models,
+        },
+        "modelVersions": [
+            {"name": model.get("name"), "version": model.get("version"), "ready": model.get("ready")}
+            for model in health_models.get("models", [])
+            if isinstance(model, dict)
+        ],
         "imageCount": len(item_results),
         "overall": compute_quality_metrics(item_results),
         "byCategory": {
@@ -395,8 +495,8 @@ def main() -> None:
         comparison = json.loads(Path(args.comparison_json).read_text(encoding="utf-8"))
         report["comparisonTo"] = args.comparison_json
 
-    json_path = REPORTS_DIR / f"{report_name}.json"
-    md_path = REPORTS_DIR / f"{report_name}.md"
+    json_path = reports_dir / f"{report_name}.json"
+    md_path = reports_dir / f"{report_name}.md"
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     md_path.write_text(markdown_summary(report, comparison), encoding="utf-8")
     print(json_path)

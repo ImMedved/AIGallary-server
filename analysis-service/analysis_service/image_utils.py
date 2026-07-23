@@ -9,12 +9,19 @@ from PIL import Image, ImageFilter, ImageOps, ImageStat
 
 ImageKind = Literal[
     "natural_photo",
+    "photo_with_text",
     "screenshot",
     "meme",
+    "poster",
     "document",
+    "form",
     "receipt",
+    "invoice",
+    "web_screenshot",
+    "ai_assistant_screenshot",
     "code_screenshot",
     "chat_screenshot",
+    "game_screenshot",
     "unknown",
 ]
 
@@ -59,34 +66,64 @@ def estimate_text_likelihood(image: Image.Image) -> float:
     return round(min(score, 1.0), 4)
 
 
-def classify_image_kind(image: Image.Image) -> ImageKind:
+def image_subtype_distribution(image: Image.Image) -> dict[str, float]:
     width, height = image.size
     mean, stddev, edge_mean, bright_ratio, dark_ratio = _gray_features(image)
     aspect = width / max(height, 1)
     portrait_ratio = height / max(width, 1)
-
-    receipt_like = portrait_ratio > 1.35 and bright_ratio > 0.58 and edge_mean > 10
-    document_like = bright_ratio > 0.42 and stddev > 22 and edge_mean > 8
+    text_likelihood = estimate_text_likelihood(image)
     screenshot_like = width >= 720 and height >= 420 and stddev < 88
-    code_like = screenshot_like and (dark_ratio > 0.38 or bright_ratio > 0.62) and edge_mean > 14
+    document_like = bright_ratio > 0.42 and stddev > 22 and edge_mean > 8
+    portrait_document = portrait_ratio > 1.05 and document_like
+    receipt_like = portrait_ratio > 1.35 and bright_ratio > 0.58 and edge_mean > 10
     chat_like = screenshot_like and portrait_ratio > 1.35 and stddev < 74 and edge_mean > 9
-    meme_like = screenshot_like and edge_mean > 13 and stddev > 34 and 0.8 <= aspect <= 1.7
+    code_like = screenshot_like and (dark_ratio > 0.38 or bright_ratio > 0.62) and edge_mean > 14
+    meme_like = screenshot_like and edge_mean > 13 and stddev > 34 and 0.8 <= aspect <= 1.7 and mean > 90
+    natural_texture = min(stddev / 95.0, 1.0) * (1.0 - min(bright_ratio, 0.82))
 
-    if receipt_like:
-        return "receipt"
-    if document_like and portrait_ratio > 1.05:
-        return "document"
-    if chat_like:
-        return "chat_screenshot"
-    if code_like:
-        return "code_screenshot"
-    if meme_like and mean > 90:
-        return "meme"
-    if screenshot_like:
+    scores = {
+        "natural_photo": 0.20 + natural_texture * 0.90 + (0.18 if not screenshot_like and not portrait_document else 0.0),
+        "photo_with_text": 0.10 + natural_texture * 0.45 + text_likelihood * 0.55,
+        "meme": 0.12 + (0.85 if meme_like else 0.0) + (0.18 if text_likelihood > 0.45 and 0.75 <= aspect <= 1.8 else 0.0),
+        "poster": 0.10 + (0.32 if document_like and 0.55 <= aspect <= 1.45 else 0.0) + text_likelihood * 0.25,
+        "document": 0.08 + (0.72 if portrait_document else 0.0) + (0.25 if bright_ratio > 0.55 and text_likelihood > 0.45 else 0.0),
+        "form": 0.04 + (0.42 if portrait_document and edge_mean > 14 else 0.0),
+        "receipt": 0.04 + (0.78 if receipt_like else 0.0),
+        "invoice": 0.03 + (0.34 if receipt_like and edge_mean > 15 and bright_ratio > 0.68 else 0.0),
+        "chat_screenshot": 0.04 + (0.86 if chat_like else 0.0),
+        "web_screenshot": 0.04 + (0.38 if screenshot_like and aspect >= 1.15 and bright_ratio > 0.28 else 0.0),
+        "ai_assistant_screenshot": 0.03 + (0.22 if chat_like and bright_ratio > 0.42 else 0.0),
+        "code_screenshot": 0.04 + (0.80 if code_like else 0.0),
+        "game_screenshot": 0.03 + (0.28 if screenshot_like and stddev > 52 and dark_ratio > 0.18 else 0.0),
+        "unknown": 0.08,
+    }
+
+    total = sum(max(0.0, value) for value in scores.values())
+    if total <= 0:
+        return {"unknown": 1.0}
+    distribution = {key: round(max(0.0, value) / total, 4) for key, value in scores.items()}
+    return dict(sorted(distribution.items(), key=lambda item: item[1], reverse=True))
+
+
+def classify_image_route(distribution: dict[str, float]) -> str:
+    confidence = max(distribution.values(), default=0.0)
+    if confidence >= 0.80:
+        return "specialized"
+    if confidence >= 0.50:
+        return "hybrid"
+    return "generic"
+
+
+def classify_image_kind(image: Image.Image) -> ImageKind:
+    distribution = image_subtype_distribution(image)
+    best = max(distribution.items(), key=lambda item: item[1], default=("unknown", 1.0))[0]
+    if best in {"web_screenshot", "ai_assistant_screenshot", "game_screenshot"}:
         return "screenshot"
-    if edge_mean > 4 or stddev > 18:
-        return "natural_photo"
-    return "unknown"
+    if best in {"photo_with_text", "poster"}:
+        return "natural_photo" if best == "photo_with_text" else "meme"
+    if best in {"form", "invoice"}:
+        return "document" if best == "form" else "receipt"
+    return best  # type: ignore[return-value]
 
 
 def polygon_to_bbox(polygon: Any) -> list[float] | None:

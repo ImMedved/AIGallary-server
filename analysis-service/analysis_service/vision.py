@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import logging
+import math
 import urllib.error
 import urllib.request
 from functools import lru_cache
@@ -54,12 +55,12 @@ def load_yolo_model(settings: Settings):
 
 
 @lru_cache(maxsize=4)
-def _load_clip_model_cached(model_name: str, pretrained_name: str):
+def _load_clip_model_cached(model_name: str, pretrained_name: str, cache_dir: str):
     import open_clip
     import torch
 
     logger.info("Loading OpenCLIP model=%s pretrained=%s", model_name, pretrained_name)
-    model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained_name)
+    model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained_name, cache_dir=cache_dir)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device).eval()
     return model, preprocess, device
@@ -67,7 +68,9 @@ def _load_clip_model_cached(model_name: str, pretrained_name: str):
 
 def load_clip_model(settings: Settings):
     _ensure_model_available(settings, "clip")
-    return _load_clip_model_cached(settings.clip_model, settings.clip_pretrained)
+    cache_dir = settings.xdg_cache_home / "open_clip"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return _load_clip_model_cached(settings.clip_model, settings.clip_pretrained, str(cache_dir))
 
 
 @lru_cache(maxsize=16)
@@ -76,8 +79,9 @@ def build_clip_prompt_inputs(model_name: str, image_kind: str, tags_key: str, de
 
     tokenizer = open_clip.get_tokenizer(model_name)
     tags = [item for item in tags_key.split("\n") if item]
-    prompts: list[tuple[str, str]] = [(tag, clip_prompt(tag, image_kind)) for tag in tags]
-    text_input = tokenizer([prompt for _, prompt in prompts]).to(device)
+    prompts: list[tuple[str, str, str]] = [(tag, clip_prompt(tag, image_kind), negative_clip_prompt(tag, image_kind)) for tag in tags]
+    flattened_prompts = [prompt for _, positive, negative in prompts for prompt in (positive, negative)]
+    text_input = tokenizer(flattened_prompts).to(device)
     return prompts, text_input
 
 
@@ -147,6 +151,79 @@ def clip_prompt(tag: str, image_kind: str) -> str:
     return f"a photo of {tag}"
 
 
+def negative_clip_prompt(tag: str, image_kind: str) -> str:
+    if image_kind in {"screenshot", "chat_screenshot", "code_screenshot"}:
+        return f"a screenshot without {tag}"
+    if image_kind in {"document", "receipt"}:
+        return f"a document that is not {tag}"
+    return f"a photo without {tag}"
+
+
+def clip_thresholds(tag: str) -> tuple[float, float, float]:
+    strict_tags = {
+        "receipt",
+        "invoice",
+        "document",
+        "chat screenshot",
+        "code screenshot",
+        "game screenshot",
+        "screenshot",
+    }
+    text_tags = {"text", "printed text", "handwritten text", "paper", "whiteboard", "poster"}
+    if tag in strict_tags:
+        return 0.225, 0.025, 0.58
+    if tag in text_tags:
+        return 0.205, 0.020, 0.56
+    return 0.190, 0.015, 0.54
+
+
+def calibrated_clip_confidence(positive_similarity: float, negative_similarity: float, tag: str) -> float:
+    positive_threshold, margin_threshold, _ = clip_thresholds(tag)
+    margin = positive_similarity - negative_similarity
+    positive_score = (positive_similarity - positive_threshold) / 0.16
+    margin_score = (margin - margin_threshold) / 0.10
+    combined = 0.62 * positive_score + 0.38 * margin_score
+    confidence = 1.0 / (1.0 + math.exp(-4.0 * combined))
+    return round(max(0.0, min(0.97, confidence)), 4)
+
+
+def clip_subtype_compatibility(tag: str, debug: AnalysisDebugPayload) -> tuple[float, str | None]:
+    subtypes = debug.imageSubtypes or {}
+    text_image_score = max(
+        subtypes.get("document", 0.0),
+        subtypes.get("form", 0.0),
+        subtypes.get("receipt", 0.0),
+        subtypes.get("invoice", 0.0),
+        subtypes.get("chat_screenshot", 0.0),
+        subtypes.get("web_screenshot", 0.0),
+        subtypes.get("code_screenshot", 0.0),
+        subtypes.get("ai_assistant_screenshot", 0.0),
+    )
+    screenshot_score = max(
+        subtypes.get("chat_screenshot", 0.0),
+        subtypes.get("web_screenshot", 0.0),
+        subtypes.get("code_screenshot", 0.0),
+        subtypes.get("ai_assistant_screenshot", 0.0),
+        subtypes.get("game_screenshot", 0.0),
+    )
+    natural_score = max(subtypes.get("natural_photo", 0.0), subtypes.get("photo_with_text", 0.0), subtypes.get("meme", 0.0), subtypes.get("poster", 0.0))
+
+    if tag in {"receipt", "invoice"}:
+        document_score = max(subtypes.get("receipt", 0.0), subtypes.get("invoice", 0.0), subtypes.get("document", 0.0), subtypes.get("form", 0.0))
+        if document_score < 0.22:
+            return 0.35, "receipt/invoice requires document-like subtype evidence"
+        return 1.0, None
+    if tag in {"chat screenshot", "code screenshot", "game screenshot", "screenshot"}:
+        if screenshot_score < 0.18 and natural_score > 0.38:
+            return 0.45, "screenshot tag conflicts with natural-photo subtype evidence"
+        return 1.0, None
+    if tag in {"document", "paper", "printed text", "handwritten text", "text", "whiteboard"}:
+        if text_image_score < 0.12 and natural_score > 0.55:
+            return 0.70, "text/document tag has weak subtype support"
+        return 1.0, None
+    return 1.0, None
+
+
 def clip_tag_candidates(image: Image.Image, debug: AnalysisDebugPayload, settings: Settings) -> list[TagCandidate]:
     if not settings.enable_clip or settings.provider == "mock":
         debug.timingsMs["clip"] = 0
@@ -176,27 +253,71 @@ def clip_tag_candidates(image: Image.Image, debug: AnalysisDebugPayload, setting
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             raw_scores = (image_features @ text_features.T)[0]
 
-        best_by_tag: dict[str, tuple[float, str]] = {}
-        for index, (tag, prompt) in enumerate(prompts):
-            raw = float(raw_scores[index].item())
-            previous = best_by_tag.get(tag)
-            if previous is None or raw > previous[0]:
-                best_by_tag[tag] = (raw, prompt)
+        scored: list[dict[str, object]] = []
+        for index, (tag, positive_prompt, negative_prompt) in enumerate(prompts):
+            positive_similarity = float(raw_scores[index * 2].item())
+            negative_similarity = float(raw_scores[index * 2 + 1].item())
+            margin = positive_similarity - negative_similarity
+            confidence = calibrated_clip_confidence(positive_similarity, negative_similarity, tag)
+            compatibility, compatibility_reason = clip_subtype_compatibility(tag, debug)
+            calibrated = round(confidence * compatibility, 4)
+            positive_threshold, margin_threshold, confidence_threshold = clip_thresholds(tag)
+            rejection_reason = None
+            if positive_similarity < positive_threshold:
+                rejection_reason = f"positive similarity {positive_similarity:.3f} below threshold {positive_threshold:.3f}"
+            elif margin < margin_threshold:
+                rejection_reason = f"margin {margin:.3f} below threshold {margin_threshold:.3f}"
+            elif compatibility < 1.0:
+                rejection_reason = compatibility_reason
+            elif calibrated < max(settings.clip_min_confidence, confidence_threshold):
+                rejection_reason = f"confidence {calibrated:.3f} below threshold {max(settings.clip_min_confidence, confidence_threshold):.3f}"
+            scored.append(
+                {
+                    "tag": tag,
+                    "positive_prompt": positive_prompt,
+                    "positive_similarity": positive_similarity,
+                    "negative_similarity": negative_similarity,
+                    "margin": margin,
+                    "confidence": calibrated,
+                    "accepted": rejection_reason is None,
+                    "rejection_reason": rejection_reason,
+                }
+            )
 
-        values = [score for score, _ in best_by_tag.values()]
-        if not values:
-            return []
-        minimum = min(values)
-        maximum = max(values)
-        denominator = max(1e-6, maximum - minimum)
-
-        ordered = sorted(best_by_tag.items(), key=lambda item: item[1][0], reverse=True)[: settings.clip_top_k]
-        for tag, (raw, prompt) in ordered:
-            normalized = (raw - minimum) / denominator
-            confidence = round(normalized, 4)
-            debug.clipScores.append(ClipCandidateDebug(tag=tag, confidence=confidence, prompt=prompt, rawScore=round(raw, 5)))
-            if confidence >= settings.clip_min_confidence:
-                candidates.append(TagCandidate(value=tag, confidence=confidence, source="CLIP", reason=f"semantic image/text similarity prompt='{prompt}'"))
+        ordered = sorted(scored, key=lambda item: float(item["confidence"]), reverse=True)[: settings.clip_top_k]
+        for item in ordered:
+            tag = str(item["tag"])
+            confidence = float(item["confidence"])
+            positive_prompt = str(item["positive_prompt"])
+            positive_similarity = float(item["positive_similarity"])
+            negative_similarity = float(item["negative_similarity"])
+            margin = float(item["margin"])
+            accepted = bool(item["accepted"])
+            rejection_reason = item["rejection_reason"]
+            debug.clipScores.append(
+                ClipCandidateDebug(
+                    tag=tag,
+                    confidence=round(confidence, 4),
+                    prompt=positive_prompt,
+                    rawScore=round(positive_similarity, 5),
+                    rawSimilarity=round(positive_similarity, 5),
+                    positiveSimilarity=round(positive_similarity, 5),
+                    negativeSimilarity=round(negative_similarity, 5),
+                    margin=round(margin, 5),
+                    calibratedConfidence=round(confidence, 4),
+                    accepted=accepted,
+                    rejectionReason=str(rejection_reason) if rejection_reason else None,
+                )
+            )
+            if accepted:
+                candidates.append(
+                    TagCandidate(
+                        value=tag,
+                        confidence=round(confidence, 4),
+                        source="CLIP",
+                        reason=f"calibrated semantic match margin={margin:.3f} prompt='{positive_prompt}'",
+                    )
+                )
         logger.debug("CLIP scores=%s", [(item.tag, item.confidence) for item in debug.clipScores[:10]])
     except Exception as exception:
         debug.errors.append(f"clip: {exception}")

@@ -155,6 +155,30 @@ class AnalysisExecutor:
             "enrichment": self.enrichment_limiter.snapshot(),
         }
 
+    async def submit(self, payload: dict[str, Any]) -> asyncio.Future:
+        if not self.fast_limiter.try_acquire():
+            if self.metrics is not None:
+                self.metrics.inc_queue_rejected_total()
+            raise QueueFullError(self.settings.queue_retry_after_seconds)
+        if self.metrics is not None:
+            self.metrics.inc_jobs_total()
+        if self.settings.executor == "inline":
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            try:
+                future.set_result(analyze_content_from_payload(payload))
+            except Exception as exception:
+                future.set_exception(exception)
+            finally:
+                self.fast_limiter.release()
+            return future
+        if self.executor is None:
+            self.start()
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(self.executor, analyze_content_from_payload, payload)
+        future.add_done_callback(lambda _: self.fast_limiter.release())
+        return future
+
     def ready(self) -> tuple[bool, dict[str, Any]]:
         model_statuses = [status.to_dict() for status in self.registry.collect_statuses(verify_checksum=False)]
         queue = self.queue_snapshot()["fast"]
@@ -178,21 +202,9 @@ class AnalysisExecutor:
         self.start()
 
     async def analyze(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if not self.fast_limiter.try_acquire():
-            if self.metrics is not None:
-                self.metrics.inc_queue_rejected_total()
-            raise QueueFullError(self.settings.queue_retry_after_seconds)
+        future: asyncio.Future | None = None
         try:
-            if self.settings.executor == "inline":
-                try:
-                    return analyze_content_from_payload(payload)
-                finally:
-                    self.fast_limiter.release()
-            if self.executor is None:
-                self.start()
-            loop = asyncio.get_running_loop()
-            future = loop.run_in_executor(self.executor, analyze_content_from_payload, payload)
-            future.add_done_callback(lambda _: self.fast_limiter.release())
+            future = await self.submit(payload)
             try:
                 return await asyncio.wait_for(asyncio.shield(future), timeout=self.settings.fast_timeout_seconds)
             except asyncio.TimeoutError as exception:
@@ -207,10 +219,12 @@ class AnalysisExecutor:
         except WorkerPoolUnavailableError:
             raise
         except RuntimeError as exception:
-            self.fast_limiter.release()
+            if future is None:
+                self.fast_limiter.release()
             raise WorkerPoolUnavailableError(str(exception)) from exception
         except Exception:
-            self.fast_limiter.release()
+            if future is None:
+                self.fast_limiter.release()
             raise
 
     async def warmup(self) -> dict[str, Any]:
@@ -225,7 +239,7 @@ class AnalysisExecutor:
         for task in pending:
             task.cancel()
         results = []
-        errors = []
+        errors = [f"warmup timed out for {len(pending)} worker(s) after {self.settings.warmup_timeout_seconds:.1f} seconds"] if pending else []
         for task in done:
             try:
                 results.append(task.result())
