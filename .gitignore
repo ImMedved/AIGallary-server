@@ -41,10 +41,13 @@ build/
 
 ### Test data
 analysis-build.log
+analysis-service/testGallery/
+analysis-service/analysis-evaluation/results/
 *.patch
 
 
 storage/
+temp/
 *.env*
 *.log
 *upload-status*
